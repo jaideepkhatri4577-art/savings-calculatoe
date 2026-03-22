@@ -48,11 +48,14 @@ class BillProcessor:
     }
     
     # CloudFront flat-rate pricing tiers (monthly, includes CDN + WAF + DDoS + DNS + S3 credits)
+    # CloudFront Flat-Rate Pricing Plans (2025)
+    # Plans include: CDN, WAF, DDoS protection, DNS, TLS, logging, edge compute
+    # Data transfer allowances: Free (100GB), Pro/Business/Premium (50TB each)
     CLOUDFRONT_FLAT_RATES = [
-        {'name': 'Free', 'price': 0, 'max_spend': 0},
-        {'name': 'Pro', 'price': 15, 'max_spend': 100},
-        {'name': 'Business', 'price': 200, 'max_spend': 1500},
-        {'name': 'Premium', 'price': 1000, 'max_spend': 5000},
+        {'name': 'Free', 'price': 0, 'max_spend': 50, 'data_limit': '100GB'},
+        {'name': 'Pro', 'price': 15, 'max_spend': 500, 'data_limit': '50TB'},
+        {'name': 'Business', 'price': 200, 'max_spend': 2000, 'data_limit': '50TB'},
+        {'name': 'Premium', 'price': 1000, 'max_spend': 10000, 'data_limit': '50TB'},
     ]
     
     @staticmethod
@@ -779,37 +782,50 @@ class BillProcessor:
     
     @staticmethod
     def calculate_cloudfront_savings(current_spend: float) -> dict:
-        """Calculate CloudFront savings using flat-rate pricing plans"""
-        # Determine best flat-rate plan
+        """
+        Calculate CloudFront savings using flat-rate pricing plans (2025)
+        Dynamically selects best plan based on actual bill amount
+        """
+        # Determine best flat-rate plan based on actual spend
         best_plan = None
         best_savings = 0
         
         for plan in BillProcessor.CLOUDFRONT_FLAT_RATES:
-            # Skip if current spend is significantly higher than plan's typical range
-            if current_spend > plan['max_spend'] * 1.5 and plan['name'] != 'Premium':
-                continue
+            potential_savings = current_spend - plan['price']
             
-            savings = current_spend - plan['price']
-            if savings > best_savings:
-                best_savings = savings
-                best_plan = plan
+            # Plan is viable if it saves money and spend is within reasonable range
+            if potential_savings > 0:
+                # For Free plan: Only recommend if spend is very low (<$50)
+                if plan['name'] == 'Free' and current_spend > 50:
+                    continue
+                
+                # For other plans: Recommend if spend is within the max range
+                if plan['name'] != 'Free' and current_spend > plan['max_spend']:
+                    continue
+                
+                # Choose plan with best savings
+                if potential_savings > best_savings:
+                    best_savings = potential_savings
+                    best_plan = plan
         
-        # If no plan fits, use Premium or calculate based on pay-as-you-go reduction
-        if not best_plan or best_savings < 0:
-            # For very high spend, estimate savings from flat-rate benefits
-            # (origin data transfer waived, request collapsing, built-in WAF/DDoS)
-            estimated_savings = current_spend * 0.25  # 25% reduction from optimizations
+        # If no flat-rate plan fits (very high spend >$10K), use pay-as-you-go optimization
+        if not best_plan or best_savings <= 0:
+            # For high-volume CloudFront, savings come from:
+            # - Origin data transfer waived (~30%)
+            # - Request collapsing (~20%)
+            # - Built-in caching optimizations
+            estimated_savings = current_spend * 0.30  # Conservative 30% reduction
             return {
                 'savings': estimated_savings,
                 'optimized_cost': current_spend - estimated_savings,
-                'plan': 'Pay-as-you-go optimized',
-                'note': 'Consider Custom pricing plan'
+                'plan': 'Pay-as-you-go with caching optimization',
+                'note': 'High-volume - optimize via caching & origin efficiency'
             }
         
         return {
             'savings': best_savings,
             'optimized_cost': best_plan['price'],
-            'plan': f"{best_plan['name']} Plan (${best_plan['price']}/month)",
+            'plan': f"{best_plan['name']} Plan (${best_plan['price']}/month, {best_plan['data_limit']})",
             'note': 'Flat-rate, no overage charges'
         }
     
