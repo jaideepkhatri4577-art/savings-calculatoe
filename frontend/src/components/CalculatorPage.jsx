@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Upload, FileText, HelpCircle } from 'lucide-react';
+import { Upload, FileText, HelpCircle, CheckCircle, TrendingDown } from 'lucide-react';
 import { Button } from './ui/button';
 import {
   Accordion,
@@ -12,6 +12,10 @@ const CalculatorPage = () => {
   const [activeTab, setActiveTab] = useState('upload');
   const [dragActive, setDragActive] = useState(false);
   const [file, setFile] = useState(null);
+  const [showResults, setShowResults] = useState(false);
+  const [monthlySpend, setMonthlySpend] = useState('');
+  const [selectedServices, setSelectedServices] = useState([]);
+  const [hasReservedInstances, setHasReservedInstances] = useState(null);
 
   const handleDrag = (e) => {
     e.preventDefault();
@@ -39,22 +43,87 @@ const CalculatorPage = () => {
     if (e.target.files && e.target.files[0]) {
       setFile(e.target.files[0]);
       console.log('File uploaded:', e.target.files[0].name);
+      // Simulate processing and show results
+      setTimeout(() => {
+        setShowResults(true);
+      }, 1500);
     }
+  };
+
+  const toggleService = (service) => {
+    if (selectedServices.includes(service)) {
+      setSelectedServices(selectedServices.filter(s => s !== service));
+    } else {
+      setSelectedServices([...selectedServices, service]);
+    }
+  };
+
+  const handleCalculateSavings = () => {
+    if (monthlySpend || selectedServices.length > 0) {
+      setShowResults(true);
+    }
+  };
+
+  const calculateSavings = () => {
+    const spend = parseFloat(monthlySpend) || 10000;
+    const services = selectedServices.length > 0 ? selectedServices : ['EC2', 'Lambda', 'RDS'];
+    
+    const savingsData = {
+      'EC2': { discount: 0.56, label: 'Compute' },
+      'Lambda': { discount: 0.12, label: 'Lambda' },
+      'RDS': { discount: 0.35, label: 'RDS' },
+      'ECS': { discount: 0.45, label: 'ECS' },
+      'Fargate': { discount: 0.40, label: 'Fargate' },
+      'ElastiCache': { discount: 0.35, label: 'ElastiCache' },
+      'OpenSearch': { discount: 0.35, label: 'OpenSearch' },
+      'Redshift': { discount: 0.38, label: 'Redshift' },
+    };
+
+    const serviceSpend = spend / services.length;
+    
+    return services.map(service => {
+      const data = savingsData[service] || { discount: 0.30, label: service };
+      const onDemand = serviceSpend;
+      const optimized = onDemand * (1 - data.discount);
+      const savings = onDemand - optimized;
+      
+      return {
+        service: data.label,
+        onDemand: onDemand,
+        optimized: optimized,
+        savings: savings,
+        discount: data.discount * 100,
+      };
+    });
+  };
+
+  const getTotalSavings = () => {
+    const breakdown = calculateSavings();
+    const totalSavings = breakdown.reduce((acc, item) => acc + item.savings, 0);
+    const totalOnDemand = breakdown.reduce((acc, item) => acc + item.onDemand, 0);
+    return {
+      total: totalSavings,
+      percentage: (totalSavings / totalOnDemand) * 100,
+      monthly: totalSavings,
+      annual: totalSavings * 12,
+    };
   };
 
   return (
     <div className="min-h-screen bg-black text-white">
-      {/* Hero Section */}
-      <div className="pt-32 pb-12 px-6">
-        <div className="container mx-auto max-w-4xl text-center">
-          <h1 className="text-5xl md:text-6xl font-bold mb-6 leading-tight">
-            See how much MilkStraw AI<br />can save you
-          </h1>
-          <p className="text-gray-400 text-lg">
-            Trusted by more than 1000 cloud engineers
-          </p>
-        </div>
-      </div>
+      {!showResults ? (
+        <>
+          {/* Hero Section */}
+          <div className="pt-32 pb-12 px-6">
+            <div className="container mx-auto max-w-4xl text-center">
+              <h1 className="text-5xl md:text-6xl font-bold mb-6 leading-tight">
+                See how much MilkStraw AI<br />can save you
+              </h1>
+              <p className="text-gray-400 text-lg">
+                Trusted by more than 1000 cloud engineers
+              </p>
+            </div>
+          </div>
 
       {/* Calculator Section */}
       <div className="px-6 pb-20">
@@ -137,28 +206,83 @@ const CalculatorPage = () => {
           {/* Manual Estimate Tab Content */}
           {activeTab === 'manual' && (
             <div className="bg-zinc-950 rounded-lg border border-zinc-800 p-12">
-              <div className="space-y-6">
+              <div className="space-y-8">
+                {/* Question 1: Services */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
-                    Monthly AWS Spend (USD)
+                  <div className="flex items-start gap-3 mb-4">
+                    <div className="w-6 h-6 rounded-full bg-orange-600 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <span className="text-xs font-bold">1</span>
+                    </div>
+                    <label className="text-base font-medium text-white">
+                      Which services do you use?
+                    </label>
+                  </div>
+                  <div className="flex flex-wrap gap-3 ml-9">
+                    {['EC2', 'Lambda', 'Fargate', 'ECS', 'RDS', 'ElastiCache', 'OpenSearch', 'Redshift'].map(service => (
+                      <button
+                        key={service}
+                        onClick={() => toggleService(service)}
+                        className={`px-4 py-2 rounded-lg border transition-all ${
+                          selectedServices.includes(service)
+                            ? 'bg-orange-600 border-orange-600 text-white'
+                            : 'bg-zinc-900 border-zinc-700 text-gray-300 hover:border-zinc-600'
+                        }`}
+                      >
+                        {service}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Question 2: Reserved Instances */}
+                <div>
+                  <div className="flex items-start gap-3 mb-4">
+                    <div className="w-6 h-6 rounded-full bg-orange-600 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <span className="text-xs font-bold">2</span>
+                    </div>
+                    <label className="text-base font-medium text-white">
+                      Do you have Reserved Instances or Savings Plans?
+                    </label>
+                  </div>
+                  <div className="flex gap-3 ml-9">
+                    {[
+                      { value: 'yes', label: 'Yes' },
+                      { value: 'no', label: 'No' },
+                      { value: 'not-sure', label: 'Not sure' }
+                    ].map(option => (
+                      <button
+                        key={option.value}
+                        onClick={() => setHasReservedInstances(option.value)}
+                        className={`px-4 py-2 rounded-lg border transition-all ${
+                          hasReservedInstances === option.value
+                            ? 'bg-orange-600 border-orange-600 text-white'
+                            : 'bg-zinc-900 border-zinc-700 text-gray-300 hover:border-zinc-600'
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Monthly Spend (Optional) */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-2">
+                    Monthly AWS Spend (USD) - Optional
                   </label>
                   <input
                     type="number"
-                    placeholder="Enter your monthly AWS spend"
+                    value={monthlySpend}
+                    onChange={(e) => setMonthlySpend(e.target.value)}
+                    placeholder="e.g., 10000"
                     className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
-                    Primary AWS Services Used
-                  </label>
-                  <textarea
-                    placeholder="e.g., EC2, S3, RDS, Lambda..."
-                    rows={4}
-                    className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
-                  />
-                </div>
-                <Button className="w-full bg-orange-600 hover:bg-orange-700 text-white py-3 rounded-lg font-medium transition-colors">
+
+                <Button 
+                  onClick={handleCalculateSavings}
+                  className="w-full bg-orange-600 hover:bg-orange-700 text-white py-3 rounded-lg font-medium transition-colors"
+                >
                   Calculate Savings
                 </Button>
               </div>
@@ -239,11 +363,123 @@ const CalculatorPage = () => {
         </div>
       </div>
 
-      {/* Help Button */}
-      <button className="fixed bottom-6 right-6 bg-white text-black rounded-full px-6 py-3 flex items-center gap-2 shadow-lg hover:shadow-xl transition-all hover:scale-105">
-        <HelpCircle className="w-5 h-5" />
-        <span className="font-medium">Get help</span>
-      </button>
+          {/* Help Button */}
+          <button className="fixed bottom-6 right-6 bg-white text-black rounded-full px-6 py-3 flex items-center gap-2 shadow-lg hover:shadow-xl transition-all hover:scale-105">
+            <HelpCircle className="w-5 h-5" />
+            <span className="font-medium">Get help</span>
+          </button>
+        </>
+      ) : (
+        <>
+          {/* Results View */}
+          <div className="pt-32 pb-12 px-6">
+            <div className="container mx-auto max-w-5xl">
+              {/* Results Header */}
+              <div className="text-center mb-12">
+                <div className="inline-flex items-center gap-2 bg-green-500/10 border border-green-500/20 rounded-full px-4 py-2 mb-6">
+                  <CheckCircle className="w-5 h-5 text-green-500" />
+                  <span className="text-green-500 font-medium">Analysis Complete</span>
+                </div>
+                <h1 className="text-5xl md:text-6xl font-bold mb-6">
+                  You could save
+                </h1>
+                <div className="text-6xl md:text-7xl font-bold mb-4">
+                  <span className="text-orange-500">
+                    ${getTotalSavings().monthly.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                  </span>
+                  <span className="text-gray-400 text-4xl">/month</span>
+                </div>
+                <p className="text-xl text-gray-400 mb-2">
+                  That's <span className="text-white font-semibold">${getTotalSavings().annual.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span> per year
+                </p>
+                <div className="flex items-center justify-center gap-2 text-lg">
+                  <TrendingDown className="w-5 h-5 text-orange-500" />
+                  <span className="text-orange-500 font-semibold">
+                    {getTotalSavings().percentage.toFixed(1)}% reduction
+                  </span>
+                  <span className="text-gray-400">in AWS costs</span>
+                </div>
+              </div>
+
+              {/* Savings Breakdown Table */}
+              <div className="bg-zinc-950 rounded-lg border border-zinc-800 overflow-hidden mb-8">
+                <div className="px-6 py-4 border-b border-zinc-800">
+                  <h2 className="text-xl font-semibold">Savings Breakdown</h2>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-zinc-800">
+                        <th className="px-6 py-4 text-left text-sm font-medium text-gray-400">Service</th>
+                        <th className="px-6 py-4 text-right text-sm font-medium text-gray-400">On-Demand Cost</th>
+                        <th className="px-6 py-4 text-right text-sm font-medium text-gray-400">Optimized Cost</th>
+                        <th className="px-6 py-4 text-right text-sm font-medium text-gray-400">Savings</th>
+                        <th className="px-6 py-4 text-center text-sm font-medium text-gray-400">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {calculateSavings().map((item, index) => (
+                        <tr key={index} className="border-b border-zinc-800 hover:bg-zinc-900/50 transition-colors">
+                          <td className="px-6 py-4 text-white font-medium">{item.service}</td>
+                          <td className="px-6 py-4 text-right text-gray-300">
+                            ${item.onDemand.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                          </td>
+                          <td className="px-6 py-4 text-right text-white font-medium">
+                            ${item.optimized.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <div className="flex flex-col items-end">
+                              <span className="text-green-500 font-semibold">
+                                -${item.savings.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                              </span>
+                              <span className="text-xs text-gray-500">
+                                (-{item.discount.toFixed(0)}%)
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <span className="inline-flex items-center gap-1 bg-green-500/10 border border-green-500/20 rounded-full px-3 py-1 text-xs text-green-500 font-medium">
+                              <CheckCircle className="w-3 h-3" />
+                              Available
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* CTA Section */}
+              <div className="text-center">
+                <p className="text-gray-400 mb-6">
+                  Ready to start saving on your AWS costs?
+                </p>
+                <div className="flex gap-4 justify-center mb-6">
+                  <Button className="bg-orange-600 hover:bg-orange-700 text-white px-8 py-3 rounded-lg font-medium transition-colors">
+                    Get Started Free
+                  </Button>
+                  <Button 
+                    onClick={() => setShowResults(false)}
+                    className="bg-zinc-800 hover:bg-zinc-700 text-white px-8 py-3 rounded-lg font-medium transition-colors"
+                  >
+                    Calculate Again
+                  </Button>
+                </div>
+                <p className="text-sm text-gray-500">
+                  No credit card required • Free for startups on AWS credits
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Help Button */}
+          <button className="fixed bottom-6 right-6 bg-white text-black rounded-full px-6 py-3 flex items-center gap-2 shadow-lg hover:shadow-xl transition-all hover:scale-105">
+            <HelpCircle className="w-5 h-5" />
+            <span className="font-medium">Get help</span>
+          </button>
+        </>
+      )}
     </div>
   );
 };
