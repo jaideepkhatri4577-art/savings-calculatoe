@@ -211,26 +211,59 @@ class BillProcessor:
             
             # Calculate storage breakdown for parsed data
             # NOTE: service_reserved['EC2'] tracks coverage already applied (portion of ec2_total)
-            # NOT an additional cost to add
             # RDS: ~15% is storage (not optimizable)
             # EC2: ~20% is EBS (not optimizable)
             
-            # EC2: Don't add reserved to total (it's already included in the bill total)
-            ec2_total = service_costs.get('EC2', 0.0)  # Bill total already includes SP coverage
+            # EC2: Use Linux/RHEL breakdown for more accurate calculation
+            ec2_bill_total = service_costs.get('EC2', 0.0)
+            ec2_linux = service_totals_raw.get('EC2_LINUX', 0.0)
+            ec2_rhel = service_totals_raw.get('EC2_RHEL', 0.0)
+            
+            # If we have Linux/RHEL breakdown, use that as the actual compute cost
+            # The bill total might have credits/adjustments applied
+            ec2_instances_total = ec2_linux + ec2_rhel
+            ec2_total = ec2_instances_total if ec2_instances_total > 0 else ec2_bill_total
+            
             ec2_ebs = 0.0
             ec2_compute_total = 0.0
             ec2_covered_by_sp = 0.0
             ec2_on_demand = 0.0
+            
             if ec2_total > 0:
-                ec2_ebs = ec2_total * 0.20
+                ec2_ebs = ec2_bill_total * 0.20 if ec2_bill_total > 0 else ec2_total * 0.20
                 ec2_compute_total = ec2_total - ec2_ebs
                 ec2_covered_by_sp = service_reserved.get('EC2', 0.0)
-                # On-demand is what's left after removing SP coverage
-                ec2_on_demand = max(0, ec2_compute_total - ec2_covered_by_sp)
+                
+                # If we have Linux/RHEL breakdown, distribute SP coverage proportionally
+                if ec2_linux > 0 and ec2_rhel > 0 and ec2_covered_by_sp > 0:
+                    # Proportional distribution of SP coverage
+                    linux_ratio = ec2_linux / ec2_instances_total
+                    rhel_ratio = ec2_rhel / ec2_instances_total
+                    
+                    linux_sp_coverage = ec2_covered_by_sp * linux_ratio
+                    rhel_sp_coverage = ec2_covered_by_sp * rhel_ratio
+                    
+                    # Calculate on-demand portions
+                    linux_on_demand = max(0, ec2_linux - linux_sp_coverage)
+                    rhel_on_demand = max(0, ec2_rhel - rhel_sp_coverage)
+                    
+                    ec2_on_demand = linux_on_demand + rhel_on_demand
+                    
+                    # Store for breakdown display
+                    service_totals_raw['EC2_LINUX_ON_DEMAND'] = linux_on_demand
+                    service_totals_raw['EC2_RHEL_ON_DEMAND'] = rhel_on_demand
+                    
+                    logger.info(f"EC2 on-demand breakdown: Linux=${linux_on_demand:,.2f}, RHEL=${rhel_on_demand:,.2f}")
+                else:
+                    # Simple calculation if no breakdown available
+                    ec2_on_demand = max(0, ec2_compute_total - ec2_covered_by_sp)
+                
                 service_costs['EC2'] = ec2_on_demand
+                
+                logger.info(f"EC2: instances_total=${ec2_instances_total:,.2f}, bill_total=${ec2_bill_total:,.2f}, compute=${ec2_compute_total:,.2f}, SP=${ec2_covered_by_sp:,.2f}, on-demand=${ec2_on_demand:,.2f}")
             
             # RDS: Similar logic
-            rds_total = service_costs.get('RDS', 0.0)  # Bill total
+            rds_total = service_costs.get('RDS', 0.0)
             rds_storage = 0.0
             rds_compute = 0.0
             if rds_total > 0:
@@ -336,9 +369,9 @@ class BillProcessor:
                 total_cost = sum(service_costs.values()) + sum(service_reserved.values()) + sum(storage_costs.values())
                 has_reserved = True
             
-            # Calculate savings only on on-demand costs
+            # Calculate savings
             savings_breakdown = BillProcessor.calculate_savings_with_coverage(
-                service_costs, service_reserved
+                service_costs, service_reserved, service_totals_raw
             )
             
             # Add original totals, storage info, and cost breakdown to each item
@@ -588,7 +621,7 @@ class BillProcessor:
             
             # Calculate savings
             savings_breakdown = BillProcessor.calculate_savings_with_coverage(
-                service_costs, service_reserved
+                service_costs, service_reserved, service_totals_raw
             )
             
             # Add original totals, storage info, and cost breakdown to each item
@@ -697,10 +730,14 @@ class BillProcessor:
     @staticmethod
     def calculate_savings_with_coverage(
         service_costs: Dict[str, float], 
-        service_reserved: Dict[str, float]
+        service_reserved: Dict[str, float],
+        service_metadata: Dict[str, Any] = None
     ) -> List[Dict[str, Any]]:
-        """Calculate potential savings accounting for existing RI/Savings Plans"""
+        """Calculate potential savings accounting for existing RI/Savings Plans and Linux/RHEL breakdown"""
         breakdown = []
+        
+        if service_metadata is None:
+            service_metadata = {}
         
         # Get all unique services
         all_services = set(list(service_costs.keys()) + list(service_reserved.keys()))
@@ -741,14 +778,40 @@ class BillProcessor:
                 # Only calculate savings on the on-demand portion
                 discount_rate = savings_info['discount']
                 
-                # Optimized cost = reserved (already optimized) + discounted on-demand
-                optimized_cost = reserved_cost + (on_demand_cost * (1 - discount_rate))
-                
-                # Savings only on on-demand portion (skip if amount too small)
-                if on_demand_cost < 10:  # Skip optimization for costs under $10
-                    savings = 0.0
+                # For EC2 with Linux/RHEL breakdown, apply different rates
+                if service == 'EC2' and 'EC2_LINUX_ON_DEMAND' in service_metadata and 'EC2_RHEL_ON_DEMAND' in service_metadata:
+                    linux_on_demand = service_metadata['EC2_LINUX_ON_DEMAND']
+                    rhel_on_demand = service_metadata['EC2_RHEL_ON_DEMAND']
+                    
+                    # AWS discount rates: Linux 56%, RHEL 40% (RHEL license costs reduce discount)
+                    linux_discount = 0.56
+                    rhel_discount = 0.40
+                    
+                    linux_savings = linux_on_demand * linux_discount
+                    rhel_savings = rhel_on_demand * rhel_discount
+                    
+                    linux_optimized = linux_on_demand * (1 - linux_discount)
+                    rhel_optimized = rhel_on_demand * (1 - rhel_discount)
+                    
+                    savings = linux_savings + rhel_savings
+                    on_demand_optimized = linux_optimized + rhel_optimized
+                    optimized_cost = reserved_cost + on_demand_optimized
+                    
+                    # Weighted average discount
+                    if on_demand_cost > 0:
+                        discount_rate = savings / on_demand_cost
+                    
+                    logger.info(f"EC2 split savings: Linux=${linux_savings:,.2f} (56%), RHEL=${rhel_savings:,.2f} (40%), total=${savings:,.2f}")
                 else:
-                    savings = on_demand_cost * discount_rate
+                    # Standard calculation for other services
+                    # Optimized cost = reserved (already optimized) + discounted on-demand
+                    optimized_cost = reserved_cost + (on_demand_cost * (1 - discount_rate))
+                    
+                    # Savings only on on-demand portion (skip if amount too small)
+                    if on_demand_cost < 10:  # Skip optimization for costs under $10
+                        savings = 0.0
+                    else:
+                        savings = on_demand_cost * discount_rate
                 
                 commitment_type = savings_info.get('commitment', 'N/A')
             

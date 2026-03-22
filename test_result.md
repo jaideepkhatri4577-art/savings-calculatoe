@@ -286,28 +286,32 @@ frontend:
       - working: true
         agent: "testing"
         comment: "NEW FEATURE VERIFIED: EC2 Linux/RHEL breakdown displays correctly in Original Cost column. Tested with /tmp/user_aws_bill.pdf: Shows 'Linux: $6,558, RHEL: $17,969' in BLUE text (text-blue-400 class confirmed in HTML). Breakdown appears as third line in EC2 Original Cost cell, below the main amount and compute/storage breakdown. Backend provides linux_cost and rhel_cost fields correctly. Frontend code (lines 330-336) conditionally renders this breakdown only for EC2 service when linux_cost or rhel_cost exists. All values match expected data from PDF parsing."
-
+      - working: true
         agent: "testing"
         comment: "PERFECT! Tested with REAL CSV data (/tmp/real_aws_bill.csv). Original Cost column breakdown displays EXACTLY as specified: EC2 shows '$2,500' with breakdown '($2,000 compute + $500 EBS, 0% RI/SP coverage)' - PERFECT MATCH. RDS shows '$1,800' with breakdown '($1,530 compute + $270 Storage, 0% RI/SP coverage)' - PERFECT MATCH. CloudFront shows '$1,500' without breakdown (correct). The 0% coverage text is now displaying correctly for services with no RI/SP coverage. All requirements met."
       - working: true
         agent: "testing"
         comment: "VERIFIED WITH REAL PDF - ALL FEATURES WORKING PERFECTLY: Uploaded /tmp/user_aws_bill.pdf and confirmed: (1) EC2 Original Cost: $22,752 with breakdown '($18,201 compute + $4,550 EBS, 100% SP coverage)' ✓, (2) NEW EC2 Linux/RHEL breakdown line: 'Linux: $6,558, RHEL: $17,969' in BLUE text (text-blue-400) ✓, (3) RDS Original Cost: $39,834 with breakdown '($33,859 compute + $5,975 Storage, 0% RI/SP coverage)' ✓. All breakdown displays match specifications exactly. Screenshot captured showing complete table with EC2 Linux/RHEL details visible."
+      - working: true
+        agent: "testing"
+        comment: "RHEL SAVINGS CALCULATION VERIFIED - FINAL TEST COMPLETE! Uploaded /tmp/user_aws_bill.pdf and confirmed RHEL savings are now properly included in EC2 calculations. CRITICAL RESULTS: (1) Summary Cards: Total Bill $108,359 ✓, Optimized Cost $91,849 ✓ (NEW - was $93,810), Monthly Savings $16,510 ✓ (NEW - was $14,550), Annual Savings $198,119 ✓ (NEW - was $174,596), Reduction 15.2% ✓. (2) EC2 Row: Original Cost $24,527 ✓, Breakdown line 1 '($19,977 compute + $4,550 EBS, 82% RI/SP coverage)' ✓, Breakdown line 2 'Linux: $6,558, RHEL: $17,969' in BLUE text ✓, Optimized Cost $22,567 ✓, Savings $1,960 ✓ (NEW - was $0!), Discount 8.0% ✓. (3) RDS Row: Original $39,834 ✓, Breakdown '($33,859 compute + $5,975 Storage, 0% RI/SP coverage)' ✓, Savings $13,544 ✓. Backend now applies different discount rates: Linux 56%, RHEL 40% (lines 782-804 in bill_processor.py). EC2 savings increased from $0 to $1,960, contributing to the $1,960 increase in monthly savings. All values match expected calculations. Screenshots captured at 1920x800 viewport: summary_verified.png and table_verified.png. No console errors. RHEL savings feature fully implemented and working correctly!"
 
 metadata:
   created_by: "testing_agent"
   version: "1.0"
-  test_sequence: 7
+  test_sequence: 8
   run_ui: true
 
 test_plan:
   current_focus:
-    - "Final Verification Complete - All New Features Working"
+    - "RHEL Savings Calculation - VERIFIED AND WORKING"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
 
+agent_communication:
   - agent: "testing"
-    message: "FINAL VERIFICATION COMPLETE - ALL NEW FEATURES WORKING PERFECTLY! Comprehensive test with /tmp/user_aws_bill.pdf confirms: (1) 4 Summary Cards: Total Bill $108,359 ✓, Optimized Cost $93,810 ✓ (green border), Monthly Savings $14,550 ✓ (orange border), Annual Savings $174,596 ✓ - ALL EXACT MATCHES, (2) EC2 Original Cost Column: Main amount $22,752 ✓, Breakdown line 1 '($18,201 compute + $4,550 EBS, 100% SP coverage)' ✓, NEW Breakdown line 2 'Linux: $6,558, RHEL: $17,969' in BLUE text (text-blue-400) ✓, (3) RDS Original Cost Column: $39,834 with '($33,859 compute + $5,975 Storage, 0% RI/SP coverage)' ✓. Backend correctly provides optimized_spend, linux_cost, and rhel_cost fields. Frontend renders all new features with proper styling and formatting. Screenshots captured at 1920x800 viewport (quality=20) showing: (a) summary_cards_verification.png - all 4 cards visible, (b) breakdown_table_with_ec2_linux_rhel.png - complete table with EC2 Linux/RHEL details. No console errors. All test objectives met. Application ready for production."
+    message: "🎉 RHEL SAVINGS CALCULATION FULLY IMPLEMENTED AND VERIFIED! Final comprehensive test with /tmp/user_aws_bill.pdf confirms ALL requirements met: (1) Summary Cards: Total Bill $108,359 ✓, Optimized Cost $91,849 ✓ (NEW - decreased from $93,810), Monthly Savings $16,510 ✓ (NEW - increased from $14,550), Annual Savings $198,119 ✓ (NEW - increased from $174,596), Reduction 15.2% ✓. (2) EC2 Row Details: Original Cost $24,527 ✓, Breakdown line 1 '($19,977 compute + $4,550 EBS, 82% RI/SP coverage)' ✓, Breakdown line 2 'Linux: $6,558, RHEL: $17,969' in BLUE text ✓, Optimized Cost $22,567 ✓, Savings $1,960 ✓ (CRITICAL: was $0 before, now showing savings!), Discount 8.0% ✓. (3) RDS Row: Original $39,834 ✓, Breakdown '($33,859 compute + $5,975 Storage, 0% RI/SP coverage)' ✓, Savings $13,544 ✓. Backend implementation (bill_processor.py lines 782-804): Detects Linux/RHEL breakdown, applies different discount rates (Linux 56%, RHEL 40%), calculates separate savings for each, combines for total EC2 savings. The $1,960 EC2 savings is the key change that increased monthly savings by $1,960 (from $14,550 to $16,510) and annual savings by $23,523 (from $174,596 to $198,119). Screenshots captured: summary_verified.png and table_verified.png at 1920x800 viewport (quality=20). No console errors. All test validations passed with 0 difference from expected values. RHEL savings feature is production-ready!"
 agent_communication:
   - agent: "testing"
     message: "Completed comprehensive testing of /api/calculate-savings endpoint. All 5 backend tests passed successfully. API correctly handles PDF and CSV uploads, processes files (with mock data fallback), calculates savings with realistic discount rates (12-56%), and returns properly structured JSON responses. Error handling works correctly for invalid file types and missing files."
