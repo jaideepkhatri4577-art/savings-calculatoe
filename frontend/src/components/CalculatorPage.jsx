@@ -304,12 +304,17 @@ const CalculatorPage = () => {
                                   <>
                                     ${item.compute_cost.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} compute + 
                                     ${item.storage_cost.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} {item.storage_label || 'storage'}
+                                    {item.coverage_percentage >= 0 && (
+                                      <>, {item.coverage_percentage.toFixed(0)}% {item.coverage_percentage >= 90 ? 'SP' : 'RI/SP'} coverage</>
+                                    )}
                                   </>
                                 ) : (
-                                  `$${originalCost.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
-                                )}
-                                {item.coverage_percentage > 0 && (
-                                  <>, {item.coverage_percentage.toFixed(0)}% {item.coverage_percentage >= 90 ? 'SP' : 'RI/SP'} coverage</>
+                                  <>
+                                    ${originalCost.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                    {item.coverage_percentage > 0 && (
+                                      <>, {item.coverage_percentage.toFixed(0)}% {item.coverage_percentage >= 90 ? 'SP' : 'RI/SP'} coverage</>
+                                    )}
+                                  </>
                                 )}
                                 )
                               </span>
