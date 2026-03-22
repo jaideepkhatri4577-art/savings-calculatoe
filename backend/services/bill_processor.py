@@ -291,7 +291,6 @@ class BillProcessor:
                 # Try both the label name and uppercase version for lookup
                 lookup_key = service_key if service_key in service_original_totals else service_key.upper()
                 
-                logger.info(f"Processing {service_key}: ec2_total={ec2_total if 'EC2' in service_key else 'n/a'}, rds_total={rds_total if 'RDS' in service_key else 'n/a'}")
                 if lookup_key in service_original_totals:
                     item['original_cost'] = service_original_totals[lookup_key]
                     item['usage_hours'] = service_usage_hours.get(lookup_key, 730)
@@ -301,12 +300,10 @@ class BillProcessor:
                         item['compute_cost'] = ec2_compute_total
                         item['storage_cost'] = ec2_ebs
                         item['storage_label'] = 'EBS'
-                        logger.info(f"Added EC2 breakdown: compute=${ec2_compute_total}, ebs=${ec2_ebs}")
                     elif service_key == 'RDS':
                         item['compute_cost'] = rds_compute
                         item['storage_cost'] = rds_storage
                         item['storage_label'] = 'Storage'
-                        logger.info(f"Added RDS breakdown: compute=${rds_compute}, storage=${rds_storage}")
                     
                     # Calculate percentage savings based on original cost
                     if item['original_cost'] > 0:
