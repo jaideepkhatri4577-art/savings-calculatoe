@@ -178,7 +178,8 @@ const CalculatorPage = () => {
         coveragePercentage: item.coverage_percentage || 0,
         reservedPortion: item.reserved_portion || 0,
         onDemandPortion: item.on_demand_portion || 0,
-        commitmentType: item.commitment_type || 'N/A'
+        commitmentType: item.commitment_type || 'N/A',
+        usageHours: item.usage_hours || null
       }));
     }
     return calculateSavings();
@@ -528,6 +529,11 @@ const CalculatorPage = () => {
                               {item.reservedPortion > 0 && (
                                 <span className="text-xs text-blue-400 mt-1">
                                   ${item.reservedPortion.toLocaleString()} covered by RI/SP
+                                </span>
+                              )}
+                              {item.usageHours && item.usageHours < 730 && (
+                                <span className="text-xs text-yellow-500 mt-1">
+                                  ⚠ {item.usageHours}h/month usage (not 24/7)
                                 </span>
                               )}
                             </div>
