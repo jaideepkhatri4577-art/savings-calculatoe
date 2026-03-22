@@ -158,9 +158,10 @@ class BillProcessor:
                         total_bill_amount = float(total_bill_match.group(1).replace(',', ''))
                         logger.info(f"Found total bill amount: ${total_bill_amount:,.2f}")
                     
-                    # Parse Linux vs RHEL EC2 instances separately
+                    # Parse Linux vs RHEL vs Windows EC2 instances separately
                     ec2_linux_total = 0.0
                     ec2_rhel_total = 0.0
+                    ec2_windows_total = 0.0
                     for line in full_text.split('\n'):
                         if 'instance usage' in line.lower() and 'USD' in line:
                             amounts = re.findall(r'USD\s+([\d,]+\.?\d*)', line)
@@ -171,9 +172,11 @@ class BillProcessor:
                                     ec2_linux_total += amount
                                 elif 'RHEL' in line or 'Red Hat' in line:
                                     ec2_rhel_total += amount
+                                elif 'Windows' in line:
+                                    ec2_windows_total += amount
                     
-                    if ec2_linux_total > 0 or ec2_rhel_total > 0:
-                        logger.info(f"EC2 breakdown - Linux: ${ec2_linux_total:,.2f}, RHEL: ${ec2_rhel_total:,.2f}")
+                    if ec2_linux_total > 0 or ec2_rhel_total > 0 or ec2_windows_total > 0:
+                        logger.info(f"EC2 breakdown - Linux: ${ec2_linux_total:,.2f}, RHEL: ${ec2_rhel_total:,.2f}, Windows: ${ec2_windows_total:,.2f}")
                     
                     for service, patterns in service_patterns.items():
                         for pattern in patterns:
@@ -187,10 +190,11 @@ class BillProcessor:
                                         service_costs[service] = amount
                                         service_reserved[service] = 0.0
                                         
-                                        # Store Linux/RHEL breakdown for EC2
-                                        if service == 'EC2' and (ec2_linux_total > 0 or ec2_rhel_total > 0):
+                                        # Store Linux/RHEL/Windows breakdown for EC2
+                                        if service == 'EC2' and (ec2_linux_total > 0 or ec2_rhel_total > 0 or ec2_windows_total > 0):
                                             service_totals_raw['EC2_LINUX'] = ec2_linux_total
                                             service_totals_raw['EC2_RHEL'] = ec2_rhel_total
+                                            service_totals_raw['EC2_WINDOWS'] = ec2_windows_total
                                         
                                         break
                                 break
@@ -212,12 +216,14 @@ class BillProcessor:
                             service_247_cost = 0.0
                             service_parttime_cost = 0.0
                             
-                            # For EC2, also track Linux vs RHEL separately for 24/7 filtering
+                            # For EC2, also track Linux vs RHEL vs Windows separately for 24/7 filtering
                             if service_key == 'EC2':
                                 ec2_linux_247 = 0.0
                                 ec2_linux_parttime = 0.0
                                 ec2_rhel_247 = 0.0
                                 ec2_rhel_parttime = 0.0
+                                ec2_windows_247 = 0.0
+                                ec2_windows_parttime = 0.0
                             
                             # Find all instances with usage hours
                             for line in full_text.split('\n'):
@@ -231,8 +237,9 @@ class BillProcessor:
                                         
                                         # For EC2, classify by OS type AND 24/7 status
                                         if service_key == 'EC2':
-                                            is_linux = 'Linux' in line and 'RHEL' not in line and 'Red Hat' not in line
+                                            is_linux = 'Linux' in line and 'RHEL' not in line and 'Red Hat' not in line and 'Windows' not in line
                                             is_rhel = 'RHEL' in line or 'Red Hat' in line
+                                            is_windows = 'Windows' in line
                                             
                                             if is_linux and is_247:
                                                 ec2_linux_247 += cost
@@ -242,6 +249,10 @@ class BillProcessor:
                                                 ec2_rhel_247 += cost
                                             elif is_rhel and not is_247:
                                                 ec2_rhel_parttime += cost
+                                            elif is_windows and is_247:
+                                                ec2_windows_247 += cost
+                                            elif is_windows and not is_247:
+                                                ec2_windows_parttime += cost
                                         
                                         # For other services, simple 24/7 classification
                                         if is_247:
@@ -255,13 +266,15 @@ class BillProcessor:
                                 service_totals_raw[f'{service_key}_PARTTIME'] = service_parttime_cost
                                 logger.info(f"{service_key}: 24/7=${service_247_cost:,.2f}, part-time=${service_parttime_cost:,.2f}")
                                 
-                                # Store EC2 Linux/RHEL 24/7 breakdown
-                                if service_key == 'EC2' and (ec2_linux_247 > 0 or ec2_rhel_247 > 0):
+                                # Store EC2 Linux/RHEL/Windows 24/7 breakdown
+                                if service_key == 'EC2' and (ec2_linux_247 > 0 or ec2_rhel_247 > 0 or ec2_windows_247 > 0):
                                     service_totals_raw['EC2_LINUX_247'] = ec2_linux_247
                                     service_totals_raw['EC2_LINUX_PARTTIME'] = ec2_linux_parttime
                                     service_totals_raw['EC2_RHEL_247'] = ec2_rhel_247
                                     service_totals_raw['EC2_RHEL_PARTTIME'] = ec2_rhel_parttime
-                                    logger.info(f"EC2 24/7 breakdown - Linux: 24/7=${ec2_linux_247:,.2f}, part-time=${ec2_linux_parttime:,.2f}; RHEL: 24/7=${ec2_rhel_247:,.2f}, part-time=${ec2_rhel_parttime:,.2f}")
+                                    service_totals_raw['EC2_WINDOWS_247'] = ec2_windows_247
+                                    service_totals_raw['EC2_WINDOWS_PARTTIME'] = ec2_windows_parttime
+                                    logger.info(f"EC2 24/7 breakdown - Linux: 24/7=${ec2_linux_247:,.2f}, part-time=${ec2_linux_parttime:,.2f}; RHEL: 24/7=${ec2_rhel_247:,.2f}, part-time=${ec2_rhel_parttime:,.2f}; Windows: 24/7=${ec2_windows_247:,.2f}, part-time=${ec2_windows_parttime:,.2f}")
                     
                     # Look for Savings Plans coverage on EC2
                     sp_matches = re.findall(r'Savings Plans for AWS Compute usage\s+USD\s+([\d,]+\.?\d*)', full_text)
@@ -285,14 +298,14 @@ class BillProcessor:
             # RDS: ~15% is storage (not optimizable)
             # EC2: ~20% is EBS (not optimizable)
             
-            # EC2: Use Linux/RHEL breakdown for more accurate calculation
+            # EC2: Use Linux/RHEL/Windows breakdown for more accurate calculation
             ec2_bill_total = service_costs.get('EC2', 0.0)
             ec2_linux = service_totals_raw.get('EC2_LINUX', 0.0)
             ec2_rhel = service_totals_raw.get('EC2_RHEL', 0.0)
+            ec2_windows = service_totals_raw.get('EC2_WINDOWS', 0.0)
             
-            # If we have Linux/RHEL breakdown, use that as the actual compute cost
-            # The bill total might have credits/adjustments applied
-            ec2_instances_total = ec2_linux + ec2_rhel
+            # If we have OS breakdown, use that as the actual compute cost
+            ec2_instances_total = ec2_linux + ec2_rhel + ec2_windows
             ec2_total = ec2_instances_total if ec2_instances_total > 0 else ec2_bill_total
             
             ec2_ebs = 0.0
@@ -305,26 +318,30 @@ class BillProcessor:
                 ec2_compute_total = ec2_total - ec2_ebs
                 ec2_covered_by_sp = service_reserved.get('EC2', 0.0)
                 
-                # If we have Linux/RHEL breakdown, distribute SP coverage proportionally
-                if ec2_linux > 0 and ec2_rhel > 0 and ec2_covered_by_sp > 0:
-                    # Proportional distribution of SP coverage
-                    linux_ratio = ec2_linux / ec2_instances_total
-                    rhel_ratio = ec2_rhel / ec2_instances_total
+                # If we have OS breakdown, distribute SP coverage proportionally
+                if ec2_instances_total > 0 and ec2_covered_by_sp > 0:
+                    # Proportional distribution of SP coverage across all OS types
+                    linux_ratio = ec2_linux / ec2_instances_total if ec2_instances_total > 0 else 0
+                    rhel_ratio = ec2_rhel / ec2_instances_total if ec2_instances_total > 0 else 0
+                    windows_ratio = ec2_windows / ec2_instances_total if ec2_instances_total > 0 else 0
                     
                     linux_sp_coverage = ec2_covered_by_sp * linux_ratio
                     rhel_sp_coverage = ec2_covered_by_sp * rhel_ratio
+                    windows_sp_coverage = ec2_covered_by_sp * windows_ratio
                     
-                    # Calculate on-demand portions
+                    # Calculate on-demand portions (what's left after SP coverage)
                     linux_on_demand = max(0, ec2_linux - linux_sp_coverage)
                     rhel_on_demand = max(0, ec2_rhel - rhel_sp_coverage)
+                    windows_on_demand = max(0, ec2_windows - windows_sp_coverage)
                     
-                    ec2_on_demand = linux_on_demand + rhel_on_demand
+                    ec2_on_demand = linux_on_demand + rhel_on_demand + windows_on_demand
                     
                     # Store for breakdown display
                     service_totals_raw['EC2_LINUX_ON_DEMAND'] = linux_on_demand
                     service_totals_raw['EC2_RHEL_ON_DEMAND'] = rhel_on_demand
+                    service_totals_raw['EC2_WINDOWS_ON_DEMAND'] = windows_on_demand
                     
-                    logger.info(f"EC2 on-demand breakdown: Linux=${linux_on_demand:,.2f}, RHEL=${rhel_on_demand:,.2f}")
+                    logger.info(f"EC2 on-demand breakdown: Linux=${linux_on_demand:,.2f}, RHEL=${rhel_on_demand:,.2f}, Windows=${windows_on_demand:,.2f}")
                 else:
                     # Simple calculation if no breakdown available
                     ec2_on_demand = max(0, ec2_compute_total - ec2_covered_by_sp)
@@ -468,13 +485,15 @@ class BillProcessor:
                     else:
                         item['savings_percentage'] = 0
             
-            # Add Linux/RHEL breakdown to EC2 item
+            # Add OS breakdown to EC2 item (only show OS types that exist)
             for item in savings_breakdown:
                 if item['service'] == 'Compute (EC2)':
-                    if 'EC2_LINUX' in service_totals_raw:
+                    if 'EC2_LINUX' in service_totals_raw and service_totals_raw['EC2_LINUX'] > 0:
                         item['linux_cost'] = service_totals_raw['EC2_LINUX']
-                    if 'EC2_RHEL' in service_totals_raw:
+                    if 'EC2_RHEL' in service_totals_raw and service_totals_raw['EC2_RHEL'] > 0:
                         item['rhel_cost'] = service_totals_raw['EC2_RHEL']
+                    if 'EC2_WINDOWS' in service_totals_raw and service_totals_raw['EC2_WINDOWS'] > 0:
+                        item['windows_cost'] = service_totals_raw['EC2_WINDOWS']
             
             return {
                 'success': True,
@@ -864,48 +883,58 @@ class BillProcessor:
                         optimized_cost = reserved_cost + (on_demand_cost * (1 - discount_rate))
                         savings = on_demand_cost * discount_rate if on_demand_cost >= 10 else 0.0
                 
-                # For EC2 with Linux/RHEL breakdown, apply Compute Savings Plan rates with 24/7 filtering
-                elif service == 'EC2' and 'EC2_LINUX_ON_DEMAND' in service_metadata and 'EC2_RHEL_ON_DEMAND' in service_metadata:
-                    linux_on_demand = service_metadata['EC2_LINUX_ON_DEMAND']
-                    rhel_on_demand = service_metadata['EC2_RHEL_ON_DEMAND']
+                # For EC2 with OS breakdown, apply Compute Savings Plan rates with 24/7 filtering
+                elif service == 'EC2' and ('EC2_LINUX_ON_DEMAND' in service_metadata or 'EC2_RHEL_ON_DEMAND' in service_metadata or 'EC2_WINDOWS_ON_DEMAND' in service_metadata):
+                    linux_on_demand = service_metadata.get('EC2_LINUX_ON_DEMAND', 0.0)
+                    rhel_on_demand = service_metadata.get('EC2_RHEL_ON_DEMAND', 0.0)
+                    windows_on_demand = service_metadata.get('EC2_WINDOWS_ON_DEMAND', 0.0)
                     
-                    # AWS 3-year No Upfront Compute Savings Plans: ~50% for both Linux and RHEL
-                    linux_discount = 0.50
-                    rhel_discount = 0.50
+                    # AWS 3-year No Upfront Compute Savings Plans discount rates
+                    linux_discount = 0.50   # ~50% for Linux
+                    rhel_discount = 0.50    # ~50% for RHEL
+                    windows_discount = 0.45 # ~45% for Windows (lower due to licensing costs)
                     
                     # Check if we have 24/7 usage data for EC2
                     ec2_linux_247 = service_metadata.get('EC2_LINUX_247', 0.0)
                     ec2_rhel_247 = service_metadata.get('EC2_RHEL_247', 0.0)
+                    ec2_windows_247 = service_metadata.get('EC2_WINDOWS_247', 0.0)
                     ec2_linux_parttime = service_metadata.get('EC2_LINUX_PARTTIME', 0.0)
                     ec2_rhel_parttime = service_metadata.get('EC2_RHEL_PARTTIME', 0.0)
+                    ec2_windows_parttime = service_metadata.get('EC2_WINDOWS_PARTTIME', 0.0)
                     
                     # If we have 24/7 breakdown, apply filtering
-                    if ec2_linux_247 > 0 or ec2_rhel_247 > 0:
-                        # Calculate ratios
+                    if ec2_linux_247 > 0 or ec2_rhel_247 > 0 or ec2_windows_247 > 0:
+                        # Calculate ratios for each OS
                         linux_total = ec2_linux_247 + ec2_linux_parttime
                         rhel_total = ec2_rhel_247 + ec2_rhel_parttime
+                        windows_total = ec2_windows_247 + ec2_windows_parttime
                         
                         linux_ratio_247 = (ec2_linux_247 / linux_total) if linux_total > 0 else 0.0
                         rhel_ratio_247 = (ec2_rhel_247 / rhel_total) if rhel_total > 0 else 0.0
+                        windows_ratio_247 = (ec2_windows_247 / windows_total) if windows_total > 0 else 0.0
                         
-                        # Apply ratio to on-demand costs
+                        # Apply ratios to on-demand costs
                         linux_247_cost = linux_on_demand * linux_ratio_247
                         linux_parttime_cost = linux_on_demand * (1 - linux_ratio_247)
                         rhel_247_cost = rhel_on_demand * rhel_ratio_247
                         rhel_parttime_cost = rhel_on_demand * (1 - rhel_ratio_247)
+                        windows_247_cost = windows_on_demand * windows_ratio_247
+                        windows_parttime_cost = windows_on_demand * (1 - windows_ratio_247)
                         
-                        # Apply Compute SP discount only to 24/7 portion
+                        # Apply Compute SP discount only to 24/7 portions
                         linux_savings = linux_247_cost * linux_discount
                         rhel_savings = rhel_247_cost * rhel_discount
+                        windows_savings = windows_247_cost * windows_discount
                         
                         linux_optimized = linux_247_cost * (1 - linux_discount)
                         rhel_optimized = rhel_247_cost * (1 - rhel_discount)
+                        windows_optimized = windows_247_cost * (1 - windows_discount)
                         
-                        savings = linux_savings + rhel_savings
-                        on_demand_optimized = linux_optimized + rhel_optimized + linux_parttime_cost + rhel_parttime_cost
+                        savings = linux_savings + rhel_savings + windows_savings
+                        on_demand_optimized = linux_optimized + rhel_optimized + windows_optimized + linux_parttime_cost + rhel_parttime_cost + windows_parttime_cost
                         optimized_cost = reserved_cost + on_demand_optimized
                         
-                        logger.info(f"EC2 Compute SP (24/7 filtered): Linux 24/7=${linux_247_cost:,.2f} ({linux_ratio_247*100:.1f}%), RHEL 24/7=${rhel_247_cost:,.2f} ({rhel_ratio_247*100:.1f}%), savings=${savings:,.2f}")
+                        logger.info(f"EC2 Compute SP (24/7 filtered): Linux 24/7=${linux_247_cost:,.2f} ({linux_ratio_247*100:.1f}%), RHEL 24/7=${rhel_247_cost:,.2f} ({rhel_ratio_247*100:.1f}%), Windows 24/7=${windows_247_cost:,.2f} ({windows_ratio_247*100:.1f}%), total savings=${savings:,.2f}")
                     
                     # Fallback: If no EC2 hours found, estimate using RDS 24/7 ratio
                     elif 'RDS_247' in service_metadata and 'RDS_PARTTIME' in service_metadata:
@@ -916,48 +945,59 @@ class BillProcessor:
                         if rds_total > 0:
                             rds_ratio_247 = rds_247 / rds_total
                             
-                            # Apply RDS ratio to EC2
+                            # Apply RDS ratio to all EC2 OS types
                             linux_247_cost = linux_on_demand * rds_ratio_247
                             linux_parttime_cost = linux_on_demand * (1 - rds_ratio_247)
                             rhel_247_cost = rhel_on_demand * rds_ratio_247
                             rhel_parttime_cost = rhel_on_demand * (1 - rds_ratio_247)
+                            windows_247_cost = windows_on_demand * rds_ratio_247
+                            windows_parttime_cost = windows_on_demand * (1 - rds_ratio_247)
                             
-                            # Apply Compute SP discount only to 24/7 portion
+                            # Apply Compute SP discount only to 24/7 portions
                             linux_savings = linux_247_cost * linux_discount
                             rhel_savings = rhel_247_cost * rhel_discount
+                            windows_savings = windows_247_cost * windows_discount
                             
                             linux_optimized = linux_247_cost * (1 - linux_discount)
                             rhel_optimized = rhel_247_cost * (1 - rhel_discount)
+                            windows_optimized = windows_247_cost * (1 - windows_discount)
                             
-                            savings = linux_savings + rhel_savings
-                            on_demand_optimized = linux_optimized + rhel_optimized + linux_parttime_cost + rhel_parttime_cost
+                            savings = linux_savings + rhel_savings + windows_savings
+                            on_demand_optimized = linux_optimized + rhel_optimized + windows_optimized + linux_parttime_cost + rhel_parttime_cost + windows_parttime_cost
                             optimized_cost = reserved_cost + on_demand_optimized
                             
-                            logger.info(f"EC2 Compute SP (RDS ratio fallback {rds_ratio_247*100:.1f}%): Linux savings=${linux_savings:,.2f}, RHEL savings=${rhel_savings:,.2f}, total=${savings:,.2f}")
+                            logger.info(f"EC2 Compute SP (RDS ratio fallback {rds_ratio_247*100:.1f}%): Linux=${linux_savings:,.2f}, RHEL=${rhel_savings:,.2f}, Windows=${windows_savings:,.2f}, total=${savings:,.2f}")
                         else:
                             # No ratio available - apply to all on-demand
                             linux_savings = linux_on_demand * linux_discount
                             rhel_savings = rhel_on_demand * rhel_discount
-                            savings = linux_savings + rhel_savings
-                            on_demand_optimized = (linux_on_demand + rhel_on_demand) * (1 - 0.50)
+                            windows_savings = windows_on_demand * windows_discount
+                            savings = linux_savings + rhel_savings + windows_savings
+                            on_demand_optimized = (linux_on_demand + rhel_on_demand + windows_on_demand) * (1 - 0.47)  # Weighted average
                             optimized_cost = reserved_cost + on_demand_optimized
                     
                     else:
                         # No usage data at all - apply to all on-demand
                         linux_savings = linux_on_demand * linux_discount
                         rhel_savings = rhel_on_demand * rhel_discount
+                        windows_savings = windows_on_demand * windows_discount
                         
                         linux_optimized = linux_on_demand * (1 - linux_discount)
                         rhel_optimized = rhel_on_demand * (1 - rhel_discount)
+                        windows_optimized = windows_on_demand * (1 - windows_discount)
                         
-                        savings = linux_savings + rhel_savings
-                        on_demand_optimized = linux_optimized + rhel_optimized
+                        savings = linux_savings + rhel_savings + windows_savings
+                        on_demand_optimized = linux_optimized + rhel_optimized + windows_optimized
                         optimized_cost = reserved_cost + on_demand_optimized
                         
-                        logger.info(f"EC2 Compute SP (no usage data): Linux=${linux_savings:,.2f}, RHEL=${rhel_savings:,.2f}, total=${savings:,.2f}")
+                        logger.info(f"EC2 Compute SP (no usage data): Linux=${linux_savings:,.2f}, RHEL=${rhel_savings:,.2f}, Windows=${windows_savings:,.2f}, total=${savings:,.2f}")
                     
-                    # Use weighted average discount rate for display
-                    discount_rate = 0.50
+                    # Calculate weighted average discount rate for display
+                    total_on_demand = linux_on_demand + rhel_on_demand + windows_on_demand
+                    if total_on_demand > 0:
+                        discount_rate = (linux_on_demand * linux_discount + rhel_on_demand * rhel_discount + windows_on_demand * windows_discount) / total_on_demand
+                    else:
+                        discount_rate = 0.50
                 else:
                     # Standard calculation for other services with 24/7 filtering
                     # Check if this service has 24/7 usage data

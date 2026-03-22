@@ -362,12 +362,15 @@ const CalculatorPage = () => {
                                 )
                               </span>
                             )}
-                            {/* Show Linux/RHEL breakdown for EC2 */}
-                            {item.service === 'Compute (EC2)' && (item.linux_cost || item.rhel_cost) && (
+                            {/* Show OS breakdown for EC2 - only show OS types that exist */}
+                            {item.service === 'Compute (EC2)' && (item.linux_cost || item.rhel_cost || item.windows_cost) && (
                               <span className="text-xs text-blue-400 flex items-center gap-1 justify-end">
                                 <span className="w-1 h-1 bg-blue-400 rounded-full"></span>
-                                Linux: ${item.linux_cost?.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) || 0}, 
-                                RHEL: ${item.rhel_cost?.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) || 0}
+                                {item.linux_cost > 0 && `Linux: $${item.linux_cost?.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
+                                {item.linux_cost > 0 && (item.rhel_cost > 0 || item.windows_cost > 0) && ', '}
+                                {item.rhel_cost > 0 && `RHEL: $${item.rhel_cost?.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
+                                {item.rhel_cost > 0 && item.windows_cost > 0 && ', '}
+                                {item.windows_cost > 0 && `Windows: $${item.windows_cost?.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
                               </span>
                             )}
                           </div>
