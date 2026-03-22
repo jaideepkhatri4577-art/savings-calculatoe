@@ -73,16 +73,45 @@ async def calculate_savings(file: UploadFile = File(...)):
     Process AWS bill (PDF or CSV) and calculate potential savings
     """
     try:
-        # Validate file type
+        # Security Check 1: Validate file provided
         if not file.filename:
             raise HTTPException(status_code=400, detail="No file provided")
         
+        # Security Check 2: Validate file extension
         file_ext = file.filename.lower().split('.')[-1]
-        if file_ext not in ['pdf', 'csv']:
-            raise HTTPException(status_code=400, detail="Only PDF and CSV files are supported")
+        allowed_extensions = ['pdf', 'csv']
+        if file_ext not in allowed_extensions:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid file type. Only PDF and CSV files are supported. Received: {file_ext}"
+            )
         
-        # Read file content
+        # Security Check 3: Validate MIME type
+        allowed_mime_types = [
+            'application/pdf',
+            'text/csv',
+            'application/csv',
+            'application/vnd.ms-excel',
+            'text/plain'  # Some browsers send CSV as text/plain
+        ]
+        if file.content_type and file.content_type not in allowed_mime_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid content type. Expected PDF or CSV. Received: {file.content_type}"
+            )
+        
+        # Security Check 4: Validate file size (max 50MB)
         file_content = await file.read()
+        max_size = 50 * 1024 * 1024  # 50MB
+        if len(file_content) > max_size:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large. Maximum size is 50MB. Received: {len(file_content) / 1024 / 1024:.2f}MB"
+            )
+        
+        # Security Check 5: Validate file is not empty
+        if len(file_content) == 0:
+            raise HTTPException(status_code=400, detail="File is empty")
         
         # Process based on file type
         if file_ext == 'pdf':
@@ -113,12 +142,17 @@ async def calculate_savings(file: UploadFile = File(...)):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in calculate_savings endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        # Security: Don't leak internal error details to client
+        logger.error(f"Error in calculate_savings endpoint: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500, 
+            detail="Unable to process file. Please ensure it's a valid AWS bill in PDF or CSV format."
+        )
 
 # Include the router in the main app
 app.include_router(api_router)
 
+# CORS Middleware
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
@@ -126,6 +160,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Security Headers Middleware
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    # Add security headers
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
 
 # Configure logging
 logging.basicConfig(
