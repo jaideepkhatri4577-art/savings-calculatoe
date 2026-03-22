@@ -188,9 +188,7 @@ class BillProcessor:
                 }
                 
                 # Store RI costs for accurate savings calculation
-                service_ri_costs = {
-                    'RDS': rds_ri_cost,  # Fixed monthly RI cost
-                }
+                service_ri_costs = {}  # Empty - no special RI costs needed
                 
                 # Store original totals and usage info for display
                 service_original_totals = {
@@ -203,8 +201,17 @@ class BillProcessor:
                     'Fargate': 1.0,
                 }
                 
+                # Track which services run 730h (24/7) and are eligible for RI
                 service_usage_hours = {
-                    'RDS': 700,  # Runs 700 hours/month
+                    'RDS': 700,         # Only 700h - NOT eligible for RI
+                    'EC2': 730,         # 24/7 - already has Savings Plan
+                    'ElastiCache': 730, # 24/7 - eligible for RI
+                    'CloudFront': 730,  # Usage-based but equivalent to 24/7
+                }
+                
+                # Override discount rates: 0% for services not running 24/7
+                service_discount_overrides = {
+                    'RDS': 0.0,  # 700h usage - RI not cost-effective
                 }
                 
                 total_cost = sum(service_costs.values()) + sum(service_reserved.values()) + sum(storage_costs.values())
@@ -220,13 +227,16 @@ class BillProcessor:
                 service_key = item['service'].replace('Compute (', '').replace(')', '')
                 if service_key in service_original_totals:
                     item['original_cost'] = service_original_totals[service_key]
+                    item['usage_hours'] = service_usage_hours.get(service_key, 730)
                     
-                    # For RDS with 700-hour usage, calculate actual RI savings
-                    if service_key == 'RDS' and service_key in service_ri_costs:
-                        ri_cost = service_ri_costs[service_key]
-                        actual_savings = item['on_demand_portion'] - ri_cost
-                        item['savings'] = round(max(0, actual_savings), 2)
-                        item['usage_hours'] = service_usage_hours.get(service_key, 730)
+                    # Override savings for services not running 730h
+                    if service_key in service_discount_overrides:
+                        discount_override = service_discount_overrides[service_key]
+                        if discount_override == 0.0:
+                            # Don't recommend RI for part-time services
+                            item['savings'] = 0.0
+                            item['discount_percentage'] = 0.0
+                            item['commitment_type'] = 'On-demand (part-time usage)'
                     
                     # Calculate percentage savings based on original cost
                     if item['original_cost'] > 0:
@@ -240,14 +250,14 @@ class BillProcessor:
                 'service_costs': service_costs,
                 'service_reserved': service_reserved,
                 'storage_costs': storage_costs,
-                'service_ri_costs': service_ri_costs,
+                'service_discount_overrides': service_discount_overrides,
                 'has_reserved_instances': has_reserved,
                 'savings_breakdown': savings_breakdown
             }
             
         except Exception as e:
             logger.error(f"Error processing PDF: {str(e)}")
-            # Return data matching user's app with storage separated and EC2 Savings Plans
+            # Return data with proper 730h vs part-time distinction
             rds_total = 3341.0
             rds_storage = rds_total * 0.15
             rds_compute = rds_total - rds_storage
@@ -256,15 +266,15 @@ class BillProcessor:
             ec2_ebs = ec2_total * 0.20
             ec2_compute_total = ec2_total - ec2_ebs
             
-            # EC2 covered by Savings Plan
+            # EC2 covered by Savings Plan (runs 730h)
             ec2_covered_by_sp = min(1307.96, ec2_compute_total)
             ec2_on_demand = max(0, ec2_compute_total - ec2_covered_by_sp)
             
             service_costs = {
-                'RDS': rds_compute,
+                'RDS': rds_compute,      # 700h - keep on-demand
                 'EC2': ec2_on_demand,
                 'CloudFront': 1053.0,
-                'ElastiCache': 522.0,
+                'ElastiCache': 522.0,    # 730h - eligible for RI
                 'S3': 479.0,
                 'Lambda': 4.75,
                 'Fargate': 0.58,
@@ -295,15 +305,34 @@ class BillProcessor:
                 'Fargate': 1.0,
             }
             
+            service_usage_hours = {
+                'RDS': 700,
+                'EC2': 730,
+                'ElastiCache': 730,
+                'CloudFront': 730,
+            }
+            
+            service_discount_overrides = {
+                'RDS': 0.0,  # Don't recommend RI for 700h usage
+            }
+            
             savings_breakdown = BillProcessor.calculate_savings_with_coverage(
                 service_costs, service_reserved
             )
             
-            # Add original totals
+            # Add original totals and apply overrides
             for item in savings_breakdown:
                 service_key = item['service'].replace('Compute (', '').replace(')', '')
                 if service_key in service_original_totals:
                     item['original_cost'] = service_original_totals[service_key]
+                    item['usage_hours'] = service_usage_hours.get(service_key, 730)
+                    
+                    if service_key in service_discount_overrides:
+                        if service_discount_overrides[service_key] == 0.0:
+                            item['savings'] = 0.0
+                            item['discount_percentage'] = 0.0
+                            item['commitment_type'] = 'On-demand (part-time usage)'
+                    
                     if item['original_cost'] > 0:
                         item['savings_percentage'] = (item['savings'] / item['original_cost']) * 100
                     else:
@@ -315,6 +344,7 @@ class BillProcessor:
                 'service_costs': service_costs,
                 'service_reserved': service_reserved,
                 'storage_costs': storage_costs,
+                'service_discount_overrides': service_discount_overrides,
                 'has_reserved_instances': True,
                 'savings_breakdown': savings_breakdown
             }
