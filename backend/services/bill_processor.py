@@ -31,17 +31,17 @@ class BillProcessor:
     SAVINGS_RATES = {
         'EC2': {'discount': 0.56, 'label': 'Compute (EC2)', 'commitment': '3-year Compute SP'},
         'RDS': {'discount': 0.40, 'label': 'RDS', 'commitment': '1-year No Upfront RI'},
-        'Lambda': {'discount': 0.12, 'label': 'Lambda', 'commitment': 'Compute SP'},
-        'ElastiCache': {'discount': 0.35, 'label': 'ElastiCache', 'commitment': '1-year No Upfront RI'},
-        'OpenSearch': {'discount': 0.35, 'label': 'OpenSearch', 'commitment': '1-year RI'},
-        'Redshift': {'discount': 0.38, 'label': 'Redshift', 'commitment': '1-year RI'},
+        'LAMBDA': {'discount': 0.12, 'label': 'Lambda', 'commitment': 'Compute SP'},
+        'ELASTICACHE': {'discount': 0.35, 'label': 'ElastiCache', 'commitment': '1-year No Upfront RI'},
+        'OPENSEARCH': {'discount': 0.35, 'label': 'OpenSearch', 'commitment': '1-year RI'},
+        'REDSHIFT': {'discount': 0.38, 'label': 'Redshift', 'commitment': '1-year RI'},
         'ECS': {'discount': 0.45, 'label': 'ECS', 'commitment': 'Compute SP'},
-        'Fargate': {'discount': 0.40, 'label': 'Fargate', 'commitment': 'Compute SP'},
+        'FARGATE': {'discount': 0.40, 'label': 'Fargate', 'commitment': 'Compute SP'},
         'S3': {'discount': 0.15, 'label': 'S3', 'commitment': 'Intelligent-Tiering'},
-        'DynamoDB': {'discount': 0.25, 'label': 'DynamoDB', 'commitment': 'Reserved Capacity'},
-        'CloudFront': {'discount': 0.0, 'label': 'CloudFront', 'commitment': 'Flat-rate Plan', 'flat_rate': True},
+        'DYNAMODB': {'discount': 0.25, 'label': 'DynamoDB', 'commitment': 'Reserved Capacity'},
+        'CLOUDFRONT': {'discount': 0.0, 'label': 'CloudFront', 'commitment': 'Flat-rate Plan', 'flat_rate': True},
         'WAF': {'discount': 0.00, 'label': 'WAF', 'commitment': 'N/A'},
-        'Data Transfer': {'discount': 0.00, 'label': 'Data Transfer', 'commitment': 'N/A'},
+        'DATA TRANSFER': {'discount': 0.00, 'label': 'Data Transfer', 'commitment': 'N/A'},
     }
     
     # CloudFront flat-rate pricing tiers (monthly, includes CDN + WAF + DDoS + DNS + S3 credits)
@@ -55,15 +55,24 @@ class BillProcessor:
     @staticmethod
     def extract_amount(text: str) -> float:
         """Extract dollar amounts from text"""
-        # Match patterns like $1,234.56 or 1234.56
-        matches = re.findall(r'\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)', text)
+        # Match patterns like $1,234.56 or 1234.56 or $2500.00
+        # First try with commas: $1,234.56
+        matches = re.findall(r'\$?(\d{1,3}(?:,\d{3})+(?:\.\d{2})?)', text)
         if matches:
-            # Clean and convert to float
             amount_str = matches[-1].replace(',', '')
             try:
                 return float(amount_str)
             except ValueError:
                 return 0.0
+        
+        # Then try without commas: $2500.00 or 2500.00
+        matches = re.findall(r'\$?(\d+(?:\.\d{2})?)', text)
+        if matches:
+            try:
+                return float(matches[-1])
+            except ValueError:
+                return 0.0
+        
         return 0.0
     
     @staticmethod
@@ -129,11 +138,16 @@ class BillProcessor:
                             service = BillProcessor.identify_service(line)
                             amount = BillProcessor.extract_amount(line)
                             is_reserved = BillProcessor.detect_reserved_coverage(line)
+                            is_storage = BillProcessor.is_storage_or_transfer_cost(line)
                             
                             if service != 'Other' and amount > 0:
                                 if service not in service_costs:
                                     service_costs[service] = 0.0
                                     service_reserved[service] = 0.0
+                                
+                                # Skip storage/transfer costs from compute optimization
+                                if is_storage:
+                                    continue
                                 
                                 if is_reserved:
                                     service_reserved[service] += amount
@@ -144,6 +158,57 @@ class BillProcessor:
                                 total_cost += amount
             except Exception as pdf_error:
                 logger.warning(f"Could not parse PDF properly: {str(pdf_error)}, using mock data")
+            
+            # Calculate storage breakdown for parsed data
+            # RDS: ~15% is storage (not optimizable)
+            # EC2: ~20% is EBS (not optimizable)
+            rds_total = service_costs.get('RDS', 0.0) + service_reserved.get('RDS', 0.0)
+            rds_storage = 0.0
+            rds_compute = 0.0
+            if rds_total > 0:
+                rds_storage = rds_total * 0.15
+                rds_compute = rds_total - rds_storage
+                # Adjust service_costs to only include on-demand compute
+                rds_on_demand = max(0, rds_compute - service_reserved.get('RDS', 0.0))
+                service_costs['RDS'] = rds_on_demand
+            
+            ec2_total = service_costs.get('EC2', 0.0) + service_reserved.get('EC2', 0.0)
+            ec2_ebs = 0.0
+            ec2_compute_total = 0.0
+            ec2_covered_by_sp = 0.0
+            ec2_on_demand = 0.0
+            if ec2_total > 0:
+                ec2_ebs = ec2_total * 0.20
+                ec2_compute_total = ec2_total - ec2_ebs
+                ec2_covered_by_sp = service_reserved.get('EC2', 0.0)
+                ec2_on_demand = max(0, ec2_compute_total - ec2_covered_by_sp)
+                service_costs['EC2'] = ec2_on_demand
+            
+            # Build storage costs dict
+            storage_costs = {}
+            if rds_storage > 0:
+                storage_costs['RDS Storage'] = rds_storage
+            if ec2_ebs > 0:
+                storage_costs['EBS'] = ec2_ebs
+            
+            # Build original totals for all services
+            service_original_totals = {}
+            service_usage_hours = {}
+            for service_key in set(list(service_costs.keys()) + list(service_reserved.keys())):
+                if service_key == 'RDS':
+                    service_original_totals[service_key] = rds_total
+                    service_usage_hours[service_key] = 730
+                elif service_key == 'EC2':
+                    service_original_totals[service_key] = ec2_total
+                    service_usage_hours[service_key] = 730
+                else:
+                    total = service_costs.get(service_key, 0.0) + service_reserved.get(service_key, 0.0)
+                    service_original_totals[service_key] = total
+                    service_usage_hours[service_key] = 730
+            
+            # Recalculate total_cost including storage
+            if not (not service_costs or total_cost == 0):
+                total_cost = sum(service_costs.values()) + sum(service_reserved.values()) + sum(storage_costs.values())
             
             # If we couldn't extract specific services, use data from user's app screenshot
             if not service_costs or total_cost == 0:
@@ -223,19 +288,25 @@ class BillProcessor:
             # Add original totals, storage info, and cost breakdown to each item
             for item in savings_breakdown:
                 service_key = item['service'].replace('Compute (', '').replace(')', '')
-                if service_key in service_original_totals:
-                    item['original_cost'] = service_original_totals[service_key]
-                    item['usage_hours'] = service_usage_hours.get(service_key, 730)
+                # Try both the label name and uppercase version for lookup
+                lookup_key = service_key if service_key in service_original_totals else service_key.upper()
+                
+                logger.info(f"Processing {service_key}: ec2_total={ec2_total if 'EC2' in service_key else 'n/a'}, rds_total={rds_total if 'RDS' in service_key else 'n/a'}")
+                if lookup_key in service_original_totals:
+                    item['original_cost'] = service_original_totals[lookup_key]
+                    item['usage_hours'] = service_usage_hours.get(lookup_key, 730)
                     
                     # Add storage breakdown for EC2 and RDS
                     if service_key == 'EC2':
                         item['compute_cost'] = ec2_compute_total
                         item['storage_cost'] = ec2_ebs
                         item['storage_label'] = 'EBS'
+                        logger.info(f"Added EC2 breakdown: compute=${ec2_compute_total}, ebs=${ec2_ebs}")
                     elif service_key == 'RDS':
                         item['compute_cost'] = rds_compute
                         item['storage_cost'] = rds_storage
                         item['storage_label'] = 'Storage'
+                        logger.info(f"Added RDS breakdown: compute=${rds_compute}, storage=${rds_storage}")
                     
                     # Calculate percentage savings based on original cost
                     if item['original_cost'] > 0:
@@ -394,28 +465,101 @@ class BillProcessor:
                 service_costs = {
                     'EC2': 0.0,  # 100% RI coverage
                     'RDS': 1171.0,
-                    'ElastiCache': 261.0,
-                    'Lambda': 2.0,
+                    'ELASTICACHE': 261.0,
+                    'LAMBDA': 2.0,
                 }
                 service_reserved = {
                     'EC2': 314.0,
                     'RDS': 0.0,
-                    'ElastiCache': 0.0,
-                    'Lambda': 0.0,
+                    'ELASTICACHE': 0.0,
+                    'LAMBDA': 0.0,
                 }
                 total_cost = 1748.0
                 has_reserved = True
+            
+            # Calculate storage breakdown for CSV data (same as PDF)
+            rds_total = service_costs.get('RDS', 0.0) + service_reserved.get('RDS', 0.0)
+            rds_storage = 0.0
+            rds_compute = 0.0
+            if rds_total > 0:
+                rds_storage = rds_total * 0.15
+                rds_compute = rds_total - rds_storage
+                rds_on_demand = max(0, rds_compute - service_reserved.get('RDS', 0.0))
+                service_costs['RDS'] = rds_on_demand
+            
+            ec2_total = service_costs.get('EC2', 0.0) + service_reserved.get('EC2', 0.0)
+            ec2_ebs = 0.0
+            ec2_compute_total = 0.0
+            ec2_covered_by_sp = 0.0
+            if ec2_total > 0:
+                ec2_ebs = ec2_total * 0.20
+                ec2_compute_total = ec2_total - ec2_ebs
+                ec2_covered_by_sp = service_reserved.get('EC2', 0.0)
+                ec2_on_demand = max(0, ec2_compute_total - ec2_covered_by_sp)
+                service_costs['EC2'] = ec2_on_demand
+            
+            # Build storage costs dict
+            storage_costs = {}
+            if rds_storage > 0:
+                storage_costs['RDS Storage'] = rds_storage
+            if ec2_ebs > 0:
+                storage_costs['EBS'] = ec2_ebs
+            
+            # Build original totals for all services
+            service_original_totals = {}
+            service_usage_hours = {}
+            for service_key in set(list(service_costs.keys()) + list(service_reserved.keys())):
+                if service_key == 'RDS':
+                    service_original_totals[service_key] = rds_total
+                    service_usage_hours[service_key] = 730
+                elif service_key == 'EC2':
+                    service_original_totals[service_key] = ec2_total
+                    service_usage_hours[service_key] = 730
+                else:
+                    total = service_costs.get(service_key, 0.0) + service_reserved.get(service_key, 0.0)
+                    service_original_totals[service_key] = total
+                    service_usage_hours[service_key] = 730
+            
+            # Recalculate total_cost including storage
+            total_cost = sum(service_costs.values()) + sum(service_reserved.values()) + sum(storage_costs.values())
             
             # Calculate savings
             savings_breakdown = BillProcessor.calculate_savings_with_coverage(
                 service_costs, service_reserved
             )
             
+            # Add original totals, storage info, and cost breakdown to each item
+            for item in savings_breakdown:
+                service_key = item['service'].replace('Compute (', '').replace(')', '')
+                # Try both the label name and uppercase version for lookup
+                lookup_key = service_key if service_key in service_original_totals else service_key.upper()
+                
+                if lookup_key in service_original_totals:
+                    item['original_cost'] = service_original_totals[lookup_key]
+                    item['usage_hours'] = service_usage_hours.get(lookup_key, 730)
+                    
+                    # Add storage breakdown for EC2 and RDS
+                    if service_key == 'EC2':
+                        item['compute_cost'] = ec2_compute_total
+                        item['storage_cost'] = ec2_ebs
+                        item['storage_label'] = 'EBS'
+                    elif service_key == 'RDS':
+                        item['compute_cost'] = rds_compute
+                        item['storage_cost'] = rds_storage
+                        item['storage_label'] = 'Storage'
+                    
+                    # Calculate percentage savings based on original cost
+                    if item['original_cost'] > 0:
+                        item['savings_percentage'] = (item['savings'] / item['original_cost']) * 100
+                    else:
+                        item['savings_percentage'] = 0
+            
             return {
                 'success': True,
                 'total_cost': total_cost,
                 'service_costs': service_costs,
                 'service_reserved': service_reserved,
+                'storage_costs': storage_costs,
                 'has_reserved_instances': has_reserved,
                 'savings_breakdown': savings_breakdown
             }
@@ -524,7 +668,7 @@ class BillProcessor:
                 coverage_status = 'On-demand'
             
             # Handle CloudFront flat-rate pricing differently
-            if service == 'CloudFront' or savings_info.get('flat_rate'):
+            if service.upper() == 'CLOUDFRONT' or savings_info.get('flat_rate'):
                 cf_result = BillProcessor.calculate_cloudfront_savings(total_service_cost)
                 savings = cf_result['savings']
                 optimized_cost = cf_result['optimized_cost']
