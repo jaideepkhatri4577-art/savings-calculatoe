@@ -27,7 +27,7 @@ class BillProcessor:
     }
     
     # Savings rates based on AWS Reserved Instances and Savings Plans
-    # RDS and ElastiCache: 1-year No Upfront Reserved Instances
+    # CloudFront: Flat-rate pricing plans (actual AWS pricing)
     SAVINGS_RATES = {
         'EC2': {'discount': 0.56, 'label': 'Compute (EC2)', 'commitment': '3-year Compute SP'},
         'RDS': {'discount': 0.40, 'label': 'RDS', 'commitment': '1-year No Upfront RI'},
@@ -39,10 +39,18 @@ class BillProcessor:
         'Fargate': {'discount': 0.40, 'label': 'Fargate', 'commitment': 'Compute SP'},
         'S3': {'discount': 0.15, 'label': 'S3', 'commitment': 'Intelligent-Tiering'},
         'DynamoDB': {'discount': 0.25, 'label': 'DynamoDB', 'commitment': 'Reserved Capacity'},
-        'CloudFront': {'discount': 0.30, 'label': 'CloudFront', 'commitment': 'Savings Bundle'},
+        'CloudFront': {'discount': 0.0, 'label': 'CloudFront', 'commitment': 'Flat-rate Plan', 'flat_rate': True},
         'WAF': {'discount': 0.00, 'label': 'WAF', 'commitment': 'N/A'},
         'Data Transfer': {'discount': 0.00, 'label': 'Data Transfer', 'commitment': 'N/A'},
     }
+    
+    # CloudFront flat-rate pricing tiers (monthly, includes CDN + WAF + DDoS + DNS + S3 credits)
+    CLOUDFRONT_FLAT_RATES = [
+        {'name': 'Free', 'price': 0, 'max_spend': 0},
+        {'name': 'Pro', 'price': 15, 'max_spend': 100},
+        {'name': 'Business', 'price': 200, 'max_spend': 1500},
+        {'name': 'Premium', 'price': 1000, 'max_spend': 5000},
+    ]
     
     @staticmethod
     def extract_amount(text: str) -> float:
@@ -61,6 +69,8 @@ class BillProcessor:
     @staticmethod
     def identify_service(text: str) -> str:
         """Identify AWS service from text"""
+        if not text:
+            return 'Other'
         text_lower = text.lower()
         for service, keywords in BillProcessor.SERVICE_MAPPING.items():
             for keyword in keywords:
@@ -71,6 +81,8 @@ class BillProcessor:
     @staticmethod
     def detect_reserved_coverage(text: str) -> bool:
         """Detect if line indicates Reserved Instance or Savings Plan usage"""
+        if not text:
+            return False
         text_lower = text.lower()
         reserved_keywords = [
             'reserved', 'reservation', 'ri-', 'savings plan', 
@@ -82,6 +94,8 @@ class BillProcessor:
     @staticmethod
     def is_storage_or_transfer_cost(text: str) -> bool:
         """Detect if cost is for EBS storage or data transfer (not eligible for RI/SP)"""
+        if not text:
+            return False
         text_lower = text.lower()
         excluded_keywords = [
             'ebs', 'elastic block storage', 'volume', 'snapshot',
@@ -335,13 +349,13 @@ class BillProcessor:
                 
                 # Try different common column names
                 for key, value in row.items():
-                    key_lower = key.lower()
+                    key_lower = key.lower() if key else ''
                     if 'service' in key_lower or 'product' in key_lower:
-                        service = BillProcessor.identify_service(value)
+                        service = BillProcessor.identify_service(str(value) if value else '')
                     if 'cost' in key_lower or 'amount' in key_lower or 'charge' in key_lower:
-                        cost = BillProcessor.extract_amount(str(value))
+                        cost = BillProcessor.extract_amount(str(value) if value else '0')
                     if 'reservation' in key_lower or 'pricing' in key_lower or 'type' in key_lower:
-                        is_reserved = BillProcessor.detect_reserved_coverage(str(value))
+                        is_reserved = BillProcessor.detect_reserved_coverage(str(value) if value else '')
                 
                 if service and service != 'Other' and cost > 0:
                     if service not in service_costs:
@@ -396,7 +410,40 @@ class BillProcessor:
             }
     
     @staticmethod
-    def calculate_savings(service_costs: Dict[str, float]) -> List[Dict[str, Any]]:
+    def calculate_cloudfront_savings(current_spend: float) -> dict:
+        """Calculate CloudFront savings using flat-rate pricing plans"""
+        # Determine best flat-rate plan
+        best_plan = None
+        best_savings = 0
+        
+        for plan in BillProcessor.CLOUDFRONT_FLAT_RATES:
+            # Skip if current spend is significantly higher than plan's typical range
+            if current_spend > plan['max_spend'] * 1.5 and plan['name'] != 'Premium':
+                continue
+            
+            savings = current_spend - plan['price']
+            if savings > best_savings:
+                best_savings = savings
+                best_plan = plan
+        
+        # If no plan fits, use Premium or calculate based on pay-as-you-go reduction
+        if not best_plan or best_savings < 0:
+            # For very high spend, estimate savings from flat-rate benefits
+            # (origin data transfer waived, request collapsing, built-in WAF/DDoS)
+            estimated_savings = current_spend * 0.25  # 25% reduction from optimizations
+            return {
+                'savings': estimated_savings,
+                'optimized_cost': current_spend - estimated_savings,
+                'plan': 'Pay-as-you-go optimized',
+                'note': 'Consider Custom pricing plan'
+            }
+        
+        return {
+            'savings': best_savings,
+            'optimized_cost': best_plan['price'],
+            'plan': f"{best_plan['name']} Plan (${best_plan['price']}/month)",
+            'note': 'Flat-rate, no overage charges'
+        }
         """Calculate potential savings for each service (legacy method)"""
         breakdown = []
         
@@ -450,27 +497,35 @@ class BillProcessor:
             else:
                 coverage_pct = 0.0
             
-            # Only calculate savings on the on-demand portion
-            discount_rate = savings_info['discount']
-            
-            # Optimized cost = reserved (already optimized) + discounted on-demand
-            optimized_cost = reserved_cost + (on_demand_cost * (1 - discount_rate))
-            
-            # Savings only on on-demand portion (skip if amount too small)
-            if on_demand_cost < 10:  # Skip optimization for costs under $10
-                savings = 0.0
-            else:
-                savings = on_demand_cost * discount_rate
-            
-            # Determine coverage status for display
-            if coverage_pct >= 100:
-                coverage_status = '100% RI'
-            elif coverage_pct >= 90:
-                coverage_status = f'{int(round(coverage_pct))}% RI'
+            # Determine coverage status label
+            if coverage_pct >= 90:
+                coverage_status = 'Fully covered'
             elif coverage_pct > 0:
-                coverage_status = f'{int(round(coverage_pct))}% RI'
+                coverage_status = 'Partially covered'
             else:
                 coverage_status = 'On-demand'
+            
+            # Handle CloudFront flat-rate pricing differently
+            if service == 'CloudFront' or savings_info.get('flat_rate'):
+                cf_result = BillProcessor.calculate_cloudfront_savings(total_service_cost)
+                savings = cf_result['savings']
+                optimized_cost = cf_result['optimized_cost']
+                discount_rate = (savings / total_service_cost) if total_service_cost > 0 else 0
+                commitment_type = cf_result['plan']
+            else:
+                # Only calculate savings on the on-demand portion
+                discount_rate = savings_info['discount']
+                
+                # Optimized cost = reserved (already optimized) + discounted on-demand
+                optimized_cost = reserved_cost + (on_demand_cost * (1 - discount_rate))
+                
+                # Savings only on on-demand portion (skip if amount too small)
+                if on_demand_cost < 10:  # Skip optimization for costs under $10
+                    savings = 0.0
+                else:
+                    savings = on_demand_cost * discount_rate
+                
+                commitment_type = savings_info.get('commitment', 'N/A')
             
             breakdown.append({
                 'service': savings_info['label'],
@@ -482,7 +537,7 @@ class BillProcessor:
                 'discount_percentage': round(discount_rate * 100, 1),
                 'coverage': coverage_status,
                 'coverage_percentage': round(coverage_pct, 1),
-                'commitment_type': savings_info.get('commitment', 'N/A')
+                'commitment_type': commitment_type
             })
         
         # Sort by total cost (highest first) - this matches user's screenshot
