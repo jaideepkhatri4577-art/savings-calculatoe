@@ -290,10 +290,11 @@ const CalculatorPage = () => {
                 <thead>
                   <tr className="border-b border-zinc-800">
                     <th className="px-6 py-4 text-left text-sm font-medium text-gray-400">Service</th>
-                    <th className="px-6 py-4 text-right text-sm font-medium text-gray-400">Original Cost</th>
+                    <th className="px-6 py-4 text-right text-sm font-medium text-gray-400">Current Cost</th>
                     <th className="px-6 py-4 text-right text-sm font-medium text-gray-400">Projected Cost</th>
                     <th className="px-6 py-4 text-right text-sm font-medium text-gray-400">Savings</th>
-                    <th className="px-6 py-4 text-center text-sm font-medium text-gray-400">Coverage</th>
+                    <th className="px-6 py-4 text-center text-sm font-medium text-gray-400">Current Coverage</th>
+                    <th className="px-6 py-4 text-left text-sm font-medium text-gray-400">Recommendation</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -383,6 +384,37 @@ const CalculatorPage = () => {
                             <CheckCircle className="w-3 h-3" />
                             {item.coverage}
                           </span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex flex-col gap-1">
+                            {item.savings > 0 && (
+                              <>
+                                <span className="text-sm text-gray-300 font-medium">
+                                  {item.commitment_type}
+                                </span>
+                                {item.on_demand_portion > 100 && (
+                                  <span className="text-xs text-orange-400">
+                                    💡 Apply to ${item.on_demand_portion.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} on-demand spend
+                                  </span>
+                                )}
+                                {item.coverage_percentage >= 90 && (
+                                  <span className="text-xs text-blue-400">
+                                    ✓ Almost fully optimized
+                                  </span>
+                                )}
+                                {item.coverage_percentage === 0 && item.on_demand_portion > 100 && (
+                                  <span className="text-xs text-green-400">
+                                    ⚡ High savings opportunity
+                                  </span>
+                                )}
+                              </>
+                            )}
+                            {item.savings === 0 && (
+                              <span className="text-xs text-gray-500">
+                                {item.coverage_percentage >= 90 ? 'Fully optimized' : 'Not applicable'}
+                              </span>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
