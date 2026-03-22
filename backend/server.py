@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -6,9 +6,10 @@ import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List
+from typing import List, Dict, Any
 import uuid
 from datetime import datetime, timezone
+from services.bill_processor import BillProcessor
 
 
 ROOT_DIR = Path(__file__).parent
@@ -65,6 +66,52 @@ async def get_status_checks():
             check['timestamp'] = datetime.fromisoformat(check['timestamp'])
     
     return status_checks
+
+@api_router.post("/calculate-savings")
+async def calculate_savings(file: UploadFile = File(...)):
+    """
+    Process AWS bill (PDF or CSV) and calculate potential savings
+    """
+    try:
+        # Validate file type
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="No file provided")
+        
+        file_ext = file.filename.lower().split('.')[-1]
+        if file_ext not in ['pdf', 'csv']:
+            raise HTTPException(status_code=400, detail="Only PDF and CSV files are supported")
+        
+        # Read file content
+        file_content = await file.read()
+        
+        # Process based on file type
+        if file_ext == 'pdf':
+            result = await BillProcessor.process_pdf(file_content)
+        else:  # csv
+            result = await BillProcessor.process_csv(file_content)
+        
+        if not result.get('success'):
+            raise HTTPException(status_code=500, detail=result.get('error', 'Error processing file'))
+        
+        # Calculate totals
+        total_savings = sum(item['savings'] for item in result['savings_breakdown'])
+        total_on_demand = sum(item['on_demand_cost'] for item in result['savings_breakdown'])
+        
+        return {
+            'success': True,
+            'current_spend': round(total_on_demand, 2),
+            'monthly_savings': round(total_savings, 2),
+            'annual_savings': round(total_savings * 12, 2),
+            'savings_percentage': round((total_savings / total_on_demand * 100), 1) if total_on_demand > 0 else 0,
+            'breakdown': result['savings_breakdown'],
+            'has_reserved_instances': any(item.get('coverage') != 'On-demand' for item in result['savings_breakdown'])
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in calculate_savings endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 # Include the router in the main app
 app.include_router(api_router)

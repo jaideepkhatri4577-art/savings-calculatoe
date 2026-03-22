@@ -16,6 +16,8 @@ const CalculatorPage = () => {
   const [monthlySpend, setMonthlySpend] = useState('');
   const [selectedServices, setSelectedServices] = useState([]);
   const [hasReservedInstances, setHasReservedInstances] = useState(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [resultsData, setResultsData] = useState(null);
 
   const handleDrag = (e) => {
     e.preventDefault();
@@ -41,12 +43,39 @@ const CalculatorPage = () => {
 
   const handleFileInput = (e) => {
     if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0]);
-      console.log('File uploaded:', e.target.files[0].name);
-      // Simulate processing and show results
-      setTimeout(() => {
-        setShowResults(true);
-      }, 1500);
+      const selectedFile = e.target.files[0];
+      setFile(selectedFile);
+      console.log('File uploaded:', selectedFile.name);
+      // Process the file
+      processFile(selectedFile);
+    }
+  };
+
+  const processFile = async (uploadedFile) => {
+    setIsProcessing(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', uploadedFile);
+
+      const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/calculate-savings`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to process file');
+      }
+
+      const data = await response.json();
+      console.log('Processing result:', data);
+      
+      setResultsData(data);
+      setIsProcessing(false);
+      setShowResults(true);
+    } catch (error) {
+      console.error('Error processing file:', error);
+      setIsProcessing(false);
+      alert('Error processing file. Please try again or use manual estimate.');
     }
   };
 
@@ -60,6 +89,22 @@ const CalculatorPage = () => {
 
   const handleCalculateSavings = () => {
     if (monthlySpend || selectedServices.length > 0) {
+      // Use mock calculation for manual estimate
+      const mockData = {
+        current_spend: parseFloat(monthlySpend) || 10000,
+        monthly_savings: 0,
+        annual_savings: 0,
+        savings_percentage: 0,
+        breakdown: calculateSavings(),
+        has_reserved_instances: hasReservedInstances === 'yes'
+      };
+      
+      // Calculate totals from breakdown
+      mockData.monthly_savings = mockData.breakdown.reduce((acc, item) => acc + item.savings, 0);
+      mockData.annual_savings = mockData.monthly_savings * 12;
+      mockData.savings_percentage = (mockData.monthly_savings / mockData.current_spend) * 100;
+      
+      setResultsData(mockData);
       setShowResults(true);
     }
   };
@@ -98,6 +143,16 @@ const CalculatorPage = () => {
   };
 
   const getTotalSavings = () => {
+    if (resultsData) {
+      return {
+        total: resultsData.monthly_savings,
+        percentage: resultsData.savings_percentage,
+        monthly: resultsData.monthly_savings,
+        annual: resultsData.annual_savings,
+      };
+    }
+    
+    // Fallback for old calculation method
     const breakdown = calculateSavings();
     const totalSavings = breakdown.reduce((acc, item) => acc + item.savings, 0);
     const totalOnDemand = breakdown.reduce((acc, item) => acc + item.onDemand, 0);
@@ -107,6 +162,20 @@ const CalculatorPage = () => {
       monthly: totalSavings,
       annual: totalSavings * 12,
     };
+  };
+
+  const getBreakdownData = () => {
+    if (resultsData && resultsData.breakdown) {
+      return resultsData.breakdown.map(item => ({
+        service: item.service,
+        onDemand: item.on_demand_cost,
+        optimized: item.optimized_cost,
+        savings: item.savings,
+        discount: item.discount_percentage,
+        coverage: item.coverage || 'On-demand'
+      }));
+    }
+    return calculateSavings();
   };
 
   return (
@@ -380,25 +449,52 @@ const CalculatorPage = () => {
                   <CheckCircle className="w-5 h-5 text-green-500" />
                   <span className="text-green-500 font-medium">Analysis Complete</span>
                 </div>
-                <h1 className="text-5xl md:text-6xl font-bold mb-6">
+                
+                {/* Show current spend card */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                  <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-6">
+                    <h3 className="text-sm text-gray-400 mb-2 uppercase tracking-wide">Current Spend</h3>
+                    <div className="text-3xl font-bold text-white">
+                      ${resultsData?.current_spend?.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) || getTotalSavings().monthly.toLocaleString('en-US')}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-2">On-demand pricing</p>
+                  </div>
+                  
+                  <div className="bg-zinc-950 border border-orange-500/30 rounded-lg p-6">
+                    <h3 className="text-sm text-gray-400 mb-2 uppercase tracking-wide">Monthly Savings</h3>
+                    <div className="text-3xl font-bold text-orange-500">
+                      ${getTotalSavings().monthly.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-2">Potential reduction</p>
+                  </div>
+                  
+                  <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-6">
+                    <h3 className="text-sm text-orange-400 mb-2 uppercase tracking-wide">Annual Savings</h3>
+                    <div className="text-3xl font-bold text-orange-400">
+                      ${getTotalSavings().annual.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-2">Per year</p>
+                  </div>
+                </div>
+
+                <h1 className="text-4xl md:text-5xl font-bold mb-4">
                   You could save
                 </h1>
-                <div className="text-6xl md:text-7xl font-bold mb-4">
-                  <span className="text-orange-500">
-                    ${getTotalSavings().monthly.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                  </span>
-                  <span className="text-gray-400 text-4xl">/month</span>
-                </div>
-                <p className="text-xl text-gray-400 mb-2">
-                  That's <span className="text-white font-semibold">${getTotalSavings().annual.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span> per year
-                </p>
-                <div className="flex items-center justify-center gap-2 text-lg">
+                <div className="flex items-center justify-center gap-2 text-lg mb-4">
                   <TrendingDown className="w-5 h-5 text-orange-500" />
                   <span className="text-orange-500 font-semibold">
                     {getTotalSavings().percentage.toFixed(1)}% reduction
                   </span>
                   <span className="text-gray-400">in AWS costs</span>
                 </div>
+                
+                {resultsData?.has_reserved_instances && (
+                  <div className="bg-orange-900/20 border border-orange-700/40 rounded-lg px-6 py-3 inline-block mt-4">
+                    <p className="text-sm text-orange-300">
+                      We detected existing Reserved Instances or Savings Plans and adjusted savings accordingly.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Savings Breakdown Table */}
@@ -418,7 +514,7 @@ const CalculatorPage = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {calculateSavings().map((item, index) => (
+                      {getBreakdownData().map((item, index) => (
                         <tr key={index} className="border-b border-zinc-800 hover:bg-zinc-900/50 transition-colors">
                           <td className="px-6 py-4 text-white font-medium">{item.service}</td>
                           <td className="px-6 py-4 text-right text-gray-300">
@@ -438,9 +534,13 @@ const CalculatorPage = () => {
                             </div>
                           </td>
                           <td className="px-6 py-4 text-center">
-                            <span className="inline-flex items-center gap-1 bg-green-500/10 border border-green-500/20 rounded-full px-3 py-1 text-xs text-green-500 font-medium">
+                            <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium ${
+                              item.coverage === 'On-demand' 
+                                ? 'bg-green-500/10 border border-green-500/20 text-green-500' 
+                                : 'bg-blue-500/10 border border-blue-500/20 text-blue-400'
+                            }`}>
                               <CheckCircle className="w-3 h-3" />
-                              Available
+                              {item.coverage === 'On-demand' ? 'Available' : item.coverage}
                             </span>
                           </td>
                         </tr>
@@ -460,7 +560,14 @@ const CalculatorPage = () => {
                     Get Started Free
                   </Button>
                   <Button 
-                    onClick={() => setShowResults(false)}
+                    onClick={() => {
+                      setShowResults(false);
+                      setFile(null);
+                      setResultsData(null);
+                      setMonthlySpend('');
+                      setSelectedServices([]);
+                      setHasReservedInstances(null);
+                    }}
                     className="bg-zinc-800 hover:bg-zinc-700 text-white px-8 py-3 rounded-lg font-medium transition-colors"
                   >
                     Calculate Again
