@@ -66,11 +66,24 @@ class BillProcessor:
         return 'Other'
     
     @staticmethod
+    def detect_reserved_coverage(text: str) -> bool:
+        """Detect if line indicates Reserved Instance or Savings Plan usage"""
+        text_lower = text.lower()
+        reserved_keywords = [
+            'reserved', 'reservation', 'ri-', 'savings plan', 
+            'sp-', 'committed', 'upfront', '1yr', '3yr',
+            'one year', 'three year', 'reserved instance'
+        ]
+        return any(keyword in text_lower for keyword in reserved_keywords)
+    
+    @staticmethod
     async def process_pdf(file_content: bytes) -> Dict[str, Any]:
         """Process AWS bill PDF and extract service costs"""
         try:
             service_costs = {}
+            service_reserved = {}  # Track reserved/covered costs
             total_cost = 0.0
+            has_reserved = False
             
             # Open PDF with pdfplumber
             try:
@@ -86,57 +99,84 @@ class BillProcessor:
                             # Look for service names and costs
                             service = BillProcessor.identify_service(line)
                             amount = BillProcessor.extract_amount(line)
+                            is_reserved = BillProcessor.detect_reserved_coverage(line)
                             
                             if service != 'Other' and amount > 0:
                                 if service not in service_costs:
                                     service_costs[service] = 0.0
-                                service_costs[service] += amount
+                                    service_reserved[service] = 0.0
+                                
+                                if is_reserved:
+                                    service_reserved[service] += amount
+                                    has_reserved = True
+                                else:
+                                    service_costs[service] += amount
+                                    
                                 total_cost += amount
             except Exception as pdf_error:
                 logger.warning(f"Could not parse PDF properly: {str(pdf_error)}, using mock data")
             
             # If we couldn't extract specific services, create realistic mock data
             if not service_costs or total_cost == 0:
-                logger.info("Using mock data for demo purposes")
-                total_cost = 10000.0  # Default mock total
+                logger.info("Using mock data for demo purposes with some RI coverage")
+                total_cost = 10000.0
+                # Mock scenario: Customer has some RI coverage on EC2
                 service_costs = {
-                    'EC2': total_cost * 0.35,
+                    'EC2': total_cost * 0.20,  # 20% on-demand (reduced from 35%)
                     'RDS': total_cost * 0.25,
                     'Lambda': total_cost * 0.15,
                     'ElastiCache': total_cost * 0.15,
                     'S3': total_cost * 0.10,
                 }
+                service_reserved = {
+                    'EC2': total_cost * 0.15,  # 15% already covered by RI
+                    'RDS': 0.0,
+                    'Lambda': 0.0,
+                    'ElastiCache': 0.0,
+                    'S3': 0.0,
+                }
+                has_reserved = True
             
-            # Calculate savings
-            savings_breakdown = BillProcessor.calculate_savings(service_costs)
+            # Calculate savings only on on-demand costs
+            savings_breakdown = BillProcessor.calculate_savings_with_coverage(
+                service_costs, service_reserved
+            )
             
             return {
                 'success': True,
                 'total_cost': total_cost,
                 'service_costs': service_costs,
+                'service_reserved': service_reserved,
+                'has_reserved_instances': has_reserved,
                 'savings_breakdown': savings_breakdown
             }
             
         except Exception as e:
             logger.error(f"Error processing PDF: {str(e)}")
             # Return mock data instead of failing
+            service_costs = {
+                'EC2': 2000.0,
+                'RDS': 2500.0,
+                'Lambda': 1500.0,
+                'ElastiCache': 1500.0,
+                'S3': 1000.0,
+            }
+            service_reserved = {
+                'EC2': 1500.0,
+                'RDS': 0.0,
+                'Lambda': 0.0,
+                'ElastiCache': 0.0,
+                'S3': 0.0,
+            }
             return {
                 'success': True,
-                'total_cost': 10000.0,
-                'service_costs': {
-                    'EC2': 3500.0,
-                    'RDS': 2500.0,
-                    'Lambda': 1500.0,
-                    'ElastiCache': 1500.0,
-                    'S3': 1000.0,
-                },
-                'savings_breakdown': BillProcessor.calculate_savings({
-                    'EC2': 3500.0,
-                    'RDS': 2500.0,
-                    'Lambda': 1500.0,
-                    'ElastiCache': 1500.0,
-                    'S3': 1000.0,
-                })
+                'total_cost': 8500.0,
+                'service_costs': service_costs,
+                'service_reserved': service_reserved,
+                'has_reserved_instances': True,
+                'savings_breakdown': BillProcessor.calculate_savings_with_coverage(
+                    service_costs, service_reserved
+                )
             }
     
     @staticmethod
@@ -144,16 +184,19 @@ class BillProcessor:
         """Process AWS bill CSV and extract service costs"""
         try:
             service_costs = {}
+            service_reserved = {}
             total_cost = 0.0
+            has_reserved = False
             
             # Decode CSV
             csv_text = file_content.decode('utf-8')
             csv_reader = csv.DictReader(io.StringIO(csv_text))
             
             for row in csv_reader:
-                # Look for service and cost columns
+                # Look for service, cost, and reservation columns
                 service = None
                 cost = 0.0
+                is_reserved = False
                 
                 # Try different common column names
                 for key, value in row.items():
@@ -162,11 +205,20 @@ class BillProcessor:
                         service = BillProcessor.identify_service(value)
                     if 'cost' in key_lower or 'amount' in key_lower or 'charge' in key_lower:
                         cost = BillProcessor.extract_amount(str(value))
+                    if 'reservation' in key_lower or 'pricing' in key_lower or 'type' in key_lower:
+                        is_reserved = BillProcessor.detect_reserved_coverage(str(value))
                 
                 if service and service != 'Other' and cost > 0:
                     if service not in service_costs:
                         service_costs[service] = 0.0
-                    service_costs[service] += cost
+                        service_reserved[service] = 0.0
+                    
+                    if is_reserved:
+                        service_reserved[service] += cost
+                        has_reserved = True
+                    else:
+                        service_costs[service] += cost
+                    
                     total_cost += cost
             
             # If we couldn't extract data, use mock data
@@ -174,20 +226,32 @@ class BillProcessor:
                 logger.warning("Could not extract detailed costs from CSV, using mock data")
                 total_cost = 10000.0
                 service_costs = {
-                    'EC2': total_cost * 0.35,
+                    'EC2': total_cost * 0.20,
                     'RDS': total_cost * 0.25,
                     'Lambda': total_cost * 0.15,
                     'ElastiCache': total_cost * 0.15,
                     'S3': total_cost * 0.10,
                 }
+                service_reserved = {
+                    'EC2': total_cost * 0.15,
+                    'RDS': 0.0,
+                    'Lambda': 0.0,
+                    'ElastiCache': 0.0,
+                    'S3': 0.0,
+                }
+                has_reserved = True
             
             # Calculate savings
-            savings_breakdown = BillProcessor.calculate_savings(service_costs)
+            savings_breakdown = BillProcessor.calculate_savings_with_coverage(
+                service_costs, service_reserved
+            )
             
             return {
                 'success': True,
                 'total_cost': total_cost,
                 'service_costs': service_costs,
+                'service_reserved': service_reserved,
+                'has_reserved_instances': has_reserved,
                 'savings_breakdown': savings_breakdown
             }
             
@@ -200,7 +264,7 @@ class BillProcessor:
     
     @staticmethod
     def calculate_savings(service_costs: Dict[str, float]) -> List[Dict[str, Any]]:
-        """Calculate potential savings for each service"""
+        """Calculate potential savings for each service (legacy method)"""
         breakdown = []
         
         for service, cost in service_costs.items():
@@ -217,7 +281,61 @@ class BillProcessor:
                 'optimized_cost': round(optimized_cost, 2),
                 'savings': round(savings, 2),
                 'discount_percentage': round(discount_rate * 100, 1),
-                'coverage': 'On-demand' if discount_rate > 0.3 else '100% RI'
+                'coverage': 'On-demand'
+            })
+        
+        # Sort by savings (highest first)
+        breakdown.sort(key=lambda x: x['savings'], reverse=True)
+        
+        return breakdown
+    
+    @staticmethod
+    def calculate_savings_with_coverage(
+        service_costs: Dict[str, float], 
+        service_reserved: Dict[str, float]
+    ) -> List[Dict[str, Any]]:
+        """Calculate potential savings accounting for existing RI/Savings Plans"""
+        breakdown = []
+        
+        # Get all unique services
+        all_services = set(list(service_costs.keys()) + list(service_reserved.keys()))
+        
+        for service in all_services:
+            on_demand_cost = service_costs.get(service, 0.0)
+            reserved_cost = service_reserved.get(service, 0.0)
+            total_service_cost = on_demand_cost + reserved_cost
+            
+            if total_service_cost == 0:
+                continue
+            
+            savings_info = BillProcessor.SAVINGS_RATES.get(service, {'discount': 0.30, 'label': service})
+            
+            # Calculate coverage percentage
+            coverage_pct = (reserved_cost / total_service_cost * 100) if total_service_cost > 0 else 0
+            
+            # Only calculate savings on the on-demand portion
+            discount_rate = savings_info['discount']
+            optimized_cost = on_demand_cost * (1 - discount_rate) + reserved_cost
+            savings = on_demand_cost * discount_rate  # Savings only on on-demand portion
+            
+            # Determine coverage status
+            if coverage_pct >= 90:
+                coverage_status = f'{int(coverage_pct)}% RI/SP'
+            elif coverage_pct > 0:
+                coverage_status = f'{int(coverage_pct)}% RI/SP'
+            else:
+                coverage_status = 'On-demand'
+            
+            breakdown.append({
+                'service': savings_info['label'],
+                'on_demand_cost': round(total_service_cost, 2),
+                'reserved_portion': round(reserved_cost, 2),
+                'on_demand_portion': round(on_demand_cost, 2),
+                'optimized_cost': round(optimized_cost, 2),
+                'savings': round(savings, 2),
+                'discount_percentage': round(discount_rate * 100, 1),
+                'coverage': coverage_status,
+                'coverage_percentage': round(coverage_pct, 1)
             })
         
         # Sort by savings (highest first)

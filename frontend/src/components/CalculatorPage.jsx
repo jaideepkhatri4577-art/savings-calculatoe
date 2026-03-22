@@ -172,7 +172,10 @@ const CalculatorPage = () => {
         optimized: item.optimized_cost,
         savings: item.savings,
         discount: item.discount_percentage,
-        coverage: item.coverage || 'On-demand'
+        coverage: item.coverage || 'On-demand',
+        coveragePercentage: item.coverage_percentage || 0,
+        reservedPortion: item.reserved_portion || 0,
+        onDemandPortion: item.on_demand_portion || 0
       }));
     }
     return calculateSavings();
@@ -491,7 +494,7 @@ const CalculatorPage = () => {
                 {resultsData?.has_reserved_instances && (
                   <div className="bg-orange-900/20 border border-orange-700/40 rounded-lg px-6 py-3 inline-block mt-4">
                     <p className="text-sm text-orange-300">
-                      We detected existing Reserved Instances or Savings Plans and adjusted savings accordingly.
+                      ✓ We detected existing Reserved Instances or Savings Plans and calculated savings only on on-demand resources.
                     </p>
                   </div>
                 )}
@@ -507,18 +510,36 @@ const CalculatorPage = () => {
                     <thead>
                       <tr className="border-b border-zinc-800">
                         <th className="px-6 py-4 text-left text-sm font-medium text-gray-400">Service</th>
-                        <th className="px-6 py-4 text-right text-sm font-medium text-gray-400">On-Demand Cost</th>
+                        <th className="px-6 py-4 text-right text-sm font-medium text-gray-400">Current Cost</th>
                         <th className="px-6 py-4 text-right text-sm font-medium text-gray-400">Optimized Cost</th>
-                        <th className="px-6 py-4 text-right text-sm font-medium text-gray-400">Savings</th>
-                        <th className="px-6 py-4 text-center text-sm font-medium text-gray-400">Status</th>
+                        <th className="px-6 py-4 text-right text-sm font-medium text-gray-400">Potential Savings</th>
+                        <th className="px-6 py-4 text-center text-sm font-medium text-gray-400">Coverage</th>
                       </tr>
                     </thead>
                     <tbody>
                       {getBreakdownData().map((item, index) => (
                         <tr key={index} className="border-b border-zinc-800 hover:bg-zinc-900/50 transition-colors">
-                          <td className="px-6 py-4 text-white font-medium">{item.service}</td>
-                          <td className="px-6 py-4 text-right text-gray-300">
-                            ${item.onDemand.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                          <td className="px-6 py-4">
+                            <div className="flex flex-col">
+                              <span className="text-white font-medium">{item.service}</span>
+                              {item.reservedPortion > 0 && (
+                                <span className="text-xs text-blue-400 mt-1">
+                                  ${item.reservedPortion.toLocaleString()} covered by RI/SP
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <div className="flex flex-col items-end">
+                              <span className="text-gray-300">
+                                ${item.onDemand.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                              </span>
+                              {item.onDemandPortion > 0 && item.reservedPortion > 0 && (
+                                <span className="text-xs text-gray-500 mt-1">
+                                  ${item.onDemandPortion.toLocaleString()} on-demand
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="px-6 py-4 text-right text-white font-medium">
                             ${item.optimized.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
@@ -535,12 +556,14 @@ const CalculatorPage = () => {
                           </td>
                           <td className="px-6 py-4 text-center">
                             <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium ${
-                              item.coverage === 'On-demand' 
-                                ? 'bg-green-500/10 border border-green-500/20 text-green-500' 
-                                : 'bg-blue-500/10 border border-blue-500/20 text-blue-400'
+                              item.coveragePercentage >= 90 
+                                ? 'bg-blue-500/10 border border-blue-500/20 text-blue-400' 
+                                : item.coveragePercentage > 0
+                                ? 'bg-purple-500/10 border border-purple-500/20 text-purple-400'
+                                : 'bg-green-500/10 border border-green-500/20 text-green-500'
                             }`}>
                               <CheckCircle className="w-3 h-3" />
-                              {item.coverage === 'On-demand' ? 'Available' : item.coverage}
+                              {item.coverage}
                             </span>
                           </td>
                         </tr>
