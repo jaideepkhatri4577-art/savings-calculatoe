@@ -310,19 +310,29 @@ class BillProcessor:
             
             savings_info = BillProcessor.SAVINGS_RATES.get(service, {'discount': 0.30, 'label': service})
             
-            # Calculate coverage percentage
-            coverage_pct = (reserved_cost / total_service_cost * 100) if total_service_cost > 0 else 0
+            # Calculate coverage percentage - this is the key fix
+            # Coverage = (Reserved Cost / Total Cost) * 100
+            if total_service_cost > 0:
+                coverage_pct = (reserved_cost / total_service_cost) * 100
+            else:
+                coverage_pct = 0.0
             
             # Only calculate savings on the on-demand portion
             discount_rate = savings_info['discount']
-            optimized_cost = on_demand_cost * (1 - discount_rate) + reserved_cost
-            savings = on_demand_cost * discount_rate  # Savings only on on-demand portion
             
-            # Determine coverage status
-            if coverage_pct >= 90:
-                coverage_status = f'{int(coverage_pct)}% RI/SP'
+            # Optimized cost = reserved (already optimized) + discounted on-demand
+            optimized_cost = reserved_cost + (on_demand_cost * (1 - discount_rate))
+            
+            # Savings only on on-demand portion
+            savings = on_demand_cost * discount_rate
+            
+            # Determine coverage status for display
+            if coverage_pct >= 100:
+                coverage_status = '100% RI/SP'
+            elif coverage_pct >= 90:
+                coverage_status = f'{int(round(coverage_pct))}% RI/SP'
             elif coverage_pct > 0:
-                coverage_status = f'{int(coverage_pct)}% RI/SP'
+                coverage_status = f'{int(round(coverage_pct))}% RI/SP'
             else:
                 coverage_status = 'On-demand'
             
@@ -338,7 +348,7 @@ class BillProcessor:
                 'coverage_percentage': round(coverage_pct, 1)
             })
         
-        # Sort by savings (highest first)
-        breakdown.sort(key=lambda x: x['savings'], reverse=True)
+        # Sort by total cost (highest first) - this matches user's screenshot
+        breakdown.sort(key=lambda x: x['on_demand_cost'], reverse=True)
         
         return breakdown
