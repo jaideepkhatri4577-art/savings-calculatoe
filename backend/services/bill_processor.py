@@ -195,21 +195,29 @@ class BillProcessor:
                                         break
                                 break
                     
-                    # For RDS, OpenSearch, ElastiCache: Extract usage hours to identify 24/7 instances
-                    for service_key in ['RDS', 'OPENSEARCH', 'ELASTICACHE']:
-                        if service_key in service_totals_raw:
+                    # For ALL services: Extract usage hours to identify 24/7 instances
+                    # Extended to include EC2, Lambda, Fargate, ECS (in addition to RDS, OpenSearch, ElastiCache)
+                    service_patterns_hours = {
+                        'RDS': r'db\.\w+.*?([\d,]+\.?\d*)\s*Hrs.*?USD\s+([\d,]+\.?\d*)',
+                        'OPENSEARCH': r'ESNode.*?([\d,]+\.?\d*)\s*Hrs.*?USD\s+([\d,]+\.?\d*)',
+                        'ELASTICACHE': r'cache\.\w+.*?([\d,]+\.?\d*)\s*Hrs.*?USD\s+([\d,]+\.?\d*)',
+                        'EC2': r'(?:Linux|RHEL|Windows|Ubuntu).*?(?:Instance|Usage).*?([\d,]+\.?\d*)\s*Hrs.*?USD\s+([\d,]+\.?\d*)',
+                        'LAMBDA': r'Lambda.*?Duration.*?([\d,]+\.?\d*)\s*Hrs.*?USD\s+([\d,]+\.?\d*)',
+                        'FARGATE': r'Fargate.*?([\d,]+\.?\d*)\s*(?:vCPU-)?Hrs.*?USD\s+([\d,]+\.?\d*)',
+                        'ECS': r'ECS.*?Task.*?([\d,]+\.?\d*)\s*Hrs.*?USD\s+([\d,]+\.?\d*)',
+                    }
+                    
+                    for service_key, instance_pattern in service_patterns_hours.items():
+                        if service_key in service_totals_raw or service_key == 'EC2':
                             service_247_cost = 0.0
                             service_parttime_cost = 0.0
                             
-                            # Service-specific instance patterns
-                            if service_key == 'RDS':
-                                instance_pattern = r'db\.\w+.*?([\d,]+\.?\d*)\s*Hrs.*?USD\s+([\d,]+\.?\d*)'
-                            elif service_key == 'OPENSEARCH':
-                                instance_pattern = r'ESNode.*?([\d,]+\.?\d*)\s*Hrs.*?USD\s+([\d,]+\.?\d*)'
-                            elif service_key == 'ELASTICACHE':
-                                instance_pattern = r'cache\.\w+.*?([\d,]+\.?\d*)\s*Hrs.*?USD\s+([\d,]+\.?\d*)'
-                            else:
-                                continue
+                            # For EC2, also track Linux vs RHEL separately for 24/7 filtering
+                            if service_key == 'EC2':
+                                ec2_linux_247 = 0.0
+                                ec2_linux_parttime = 0.0
+                                ec2_rhel_247 = 0.0
+                                ec2_rhel_parttime = 0.0
                             
                             # Find all instances with usage hours
                             for line in full_text.split('\n'):
@@ -219,15 +227,41 @@ class BillProcessor:
                                     cost = float(match.group(2).replace(',', ''))
                                     
                                     if cost > 1:  # Filter tiny amounts
-                                        if hours >= 720:  # 24/7 instances (≥720h)
+                                        is_247 = hours >= 720  # 24/7 instances (≥720h)
+                                        
+                                        # For EC2, classify by OS type AND 24/7 status
+                                        if service_key == 'EC2':
+                                            is_linux = 'Linux' in line and 'RHEL' not in line and 'Red Hat' not in line
+                                            is_rhel = 'RHEL' in line or 'Red Hat' in line
+                                            
+                                            if is_linux and is_247:
+                                                ec2_linux_247 += cost
+                                            elif is_linux and not is_247:
+                                                ec2_linux_parttime += cost
+                                            elif is_rhel and is_247:
+                                                ec2_rhel_247 += cost
+                                            elif is_rhel and not is_247:
+                                                ec2_rhel_parttime += cost
+                                        
+                                        # For other services, simple 24/7 classification
+                                        if is_247:
                                             service_247_cost += cost
                                         else:
                                             service_parttime_cost += cost
                             
-                            if service_247_cost > 0:
+                            # Store results if we found usage data
+                            if service_247_cost > 0 or service_parttime_cost > 0:
                                 service_totals_raw[f'{service_key}_247'] = service_247_cost
                                 service_totals_raw[f'{service_key}_PARTTIME'] = service_parttime_cost
                                 logger.info(f"{service_key}: 24/7=${service_247_cost:,.2f}, part-time=${service_parttime_cost:,.2f}")
+                                
+                                # Store EC2 Linux/RHEL 24/7 breakdown
+                                if service_key == 'EC2' and (ec2_linux_247 > 0 or ec2_rhel_247 > 0):
+                                    service_totals_raw['EC2_LINUX_247'] = ec2_linux_247
+                                    service_totals_raw['EC2_LINUX_PARTTIME'] = ec2_linux_parttime
+                                    service_totals_raw['EC2_RHEL_247'] = ec2_rhel_247
+                                    service_totals_raw['EC2_RHEL_PARTTIME'] = ec2_rhel_parttime
+                                    logger.info(f"EC2 24/7 breakdown - Linux: 24/7=${ec2_linux_247:,.2f}, part-time=${ec2_linux_parttime:,.2f}; RHEL: 24/7=${ec2_rhel_247:,.2f}, part-time=${ec2_rhel_parttime:,.2f}")
                     
                     # Look for Savings Plans coverage on EC2
                     sp_matches = re.findall(r'Savings Plans for AWS Compute usage\s+USD\s+([\d,]+\.?\d*)', full_text)
@@ -400,9 +434,6 @@ class BillProcessor:
                     'CloudFront': 730,
                 }
                 
-                # No discount overrides - all services eligible
-                service_discount_overrides = {}
-                
                 total_cost = sum(service_costs.values()) + sum(service_reserved.values()) + sum(storage_costs.values())
                 has_reserved = True
             
@@ -513,8 +544,13 @@ class BillProcessor:
                 'CloudFront': 730,
             }
             
+            # Build service_totals_raw for the error handler path
+            service_totals_raw = {}
+            for svc in service_original_totals:
+                service_totals_raw[svc] = service_original_totals[svc]
+            
             savings_breakdown = BillProcessor.calculate_savings_with_coverage(
-                service_costs, service_reserved
+                service_costs, service_reserved, service_totals_raw
             )
             
             # Add original totals, storage breakdown, and cost details
@@ -555,6 +591,7 @@ class BillProcessor:
         try:
             service_costs = {}
             service_reserved = {}
+            service_totals_raw = {}  # Add this for consistency with PDF path
             total_cost = 0.0
             has_reserved = False
             
@@ -611,6 +648,11 @@ class BillProcessor:
             
             # Calculate storage breakdown for CSV data (same as PDF)
             # NOTE: service_reserved tracks coverage already in bill, not additional cost
+            
+            # Populate service_totals_raw for calculate_savings_with_coverage
+            for svc in set(list(service_costs.keys()) + list(service_reserved.keys())):
+                service_totals_raw[svc] = service_costs.get(svc, 0.0) + service_reserved.get(svc, 0.0)
+            
             rds_total = service_costs.get('RDS', 0.0)
             rds_storage = 0.0
             rds_compute = 0.0
@@ -739,30 +781,6 @@ class BillProcessor:
             'plan': f"{best_plan['name']} Plan (${best_plan['price']}/month)",
             'note': 'Flat-rate, no overage charges'
         }
-        """Calculate potential savings for each service (legacy method)"""
-        breakdown = []
-        
-        for service, cost in service_costs.items():
-            savings_info = BillProcessor.SAVINGS_RATES.get(service, {'discount': 0.30, 'label': service})
-            
-            on_demand_cost = cost
-            discount_rate = savings_info['discount']
-            optimized_cost = on_demand_cost * (1 - discount_rate)
-            savings = on_demand_cost - optimized_cost
-            
-            breakdown.append({
-                'service': savings_info['label'],
-                'on_demand_cost': round(on_demand_cost, 2),
-                'optimized_cost': round(optimized_cost, 2),
-                'savings': round(savings, 2),
-                'discount_percentage': round(discount_rate * 100, 1),
-                'coverage': 'On-demand'
-            })
-        
-        # Sort by savings (highest first)
-        breakdown.sort(key=lambda x: x['savings'], reverse=True)
-        
-        return breakdown
     
     @staticmethod
     def calculate_savings_with_coverage(
@@ -846,40 +864,137 @@ class BillProcessor:
                         optimized_cost = reserved_cost + (on_demand_cost * (1 - discount_rate))
                         savings = on_demand_cost * discount_rate if on_demand_cost >= 10 else 0.0
                 
-                # For EC2 with Linux/RHEL breakdown, apply Compute Savings Plan rates
+                # For EC2 with Linux/RHEL breakdown, apply Compute Savings Plan rates with 24/7 filtering
                 elif service == 'EC2' and 'EC2_LINUX_ON_DEMAND' in service_metadata and 'EC2_RHEL_ON_DEMAND' in service_metadata:
                     linux_on_demand = service_metadata['EC2_LINUX_ON_DEMAND']
                     rhel_on_demand = service_metadata['EC2_RHEL_ON_DEMAND']
                     
                     # AWS 3-year No Upfront Compute Savings Plans: ~50% for both Linux and RHEL
-                    # (Range: 38-62%, using 50% as typical mid-range for 3-year No Upfront)
                     linux_discount = 0.50
                     rhel_discount = 0.50
                     
-                    linux_savings = linux_on_demand * linux_discount
-                    rhel_savings = rhel_on_demand * rhel_discount
+                    # Check if we have 24/7 usage data for EC2
+                    ec2_linux_247 = service_metadata.get('EC2_LINUX_247', 0.0)
+                    ec2_rhel_247 = service_metadata.get('EC2_RHEL_247', 0.0)
+                    ec2_linux_parttime = service_metadata.get('EC2_LINUX_PARTTIME', 0.0)
+                    ec2_rhel_parttime = service_metadata.get('EC2_RHEL_PARTTIME', 0.0)
                     
-                    linux_optimized = linux_on_demand * (1 - linux_discount)
-                    rhel_optimized = rhel_on_demand * (1 - rhel_discount)
+                    # If we have 24/7 breakdown, apply filtering
+                    if ec2_linux_247 > 0 or ec2_rhel_247 > 0:
+                        # Calculate ratios
+                        linux_total = ec2_linux_247 + ec2_linux_parttime
+                        rhel_total = ec2_rhel_247 + ec2_rhel_parttime
+                        
+                        linux_ratio_247 = (ec2_linux_247 / linux_total) if linux_total > 0 else 0.0
+                        rhel_ratio_247 = (ec2_rhel_247 / rhel_total) if rhel_total > 0 else 0.0
+                        
+                        # Apply ratio to on-demand costs
+                        linux_247_cost = linux_on_demand * linux_ratio_247
+                        linux_parttime_cost = linux_on_demand * (1 - linux_ratio_247)
+                        rhel_247_cost = rhel_on_demand * rhel_ratio_247
+                        rhel_parttime_cost = rhel_on_demand * (1 - rhel_ratio_247)
+                        
+                        # Apply Compute SP discount only to 24/7 portion
+                        linux_savings = linux_247_cost * linux_discount
+                        rhel_savings = rhel_247_cost * rhel_discount
+                        
+                        linux_optimized = linux_247_cost * (1 - linux_discount)
+                        rhel_optimized = rhel_247_cost * (1 - rhel_discount)
+                        
+                        savings = linux_savings + rhel_savings
+                        on_demand_optimized = linux_optimized + rhel_optimized + linux_parttime_cost + rhel_parttime_cost
+                        optimized_cost = reserved_cost + on_demand_optimized
+                        
+                        logger.info(f"EC2 Compute SP (24/7 filtered): Linux 24/7=${linux_247_cost:,.2f} ({linux_ratio_247*100:.1f}%), RHEL 24/7=${rhel_247_cost:,.2f} ({rhel_ratio_247*100:.1f}%), savings=${savings:,.2f}")
                     
-                    savings = linux_savings + rhel_savings
-                    on_demand_optimized = linux_optimized + rhel_optimized
-                    optimized_cost = reserved_cost + on_demand_optimized
+                    # Fallback: If no EC2 hours found, estimate using RDS 24/7 ratio
+                    elif 'RDS_247' in service_metadata and 'RDS_PARTTIME' in service_metadata:
+                        rds_247 = service_metadata['RDS_247']
+                        rds_parttime = service_metadata['RDS_PARTTIME']
+                        rds_total = rds_247 + rds_parttime
+                        
+                        if rds_total > 0:
+                            rds_ratio_247 = rds_247 / rds_total
+                            
+                            # Apply RDS ratio to EC2
+                            linux_247_cost = linux_on_demand * rds_ratio_247
+                            linux_parttime_cost = linux_on_demand * (1 - rds_ratio_247)
+                            rhel_247_cost = rhel_on_demand * rds_ratio_247
+                            rhel_parttime_cost = rhel_on_demand * (1 - rds_ratio_247)
+                            
+                            # Apply Compute SP discount only to 24/7 portion
+                            linux_savings = linux_247_cost * linux_discount
+                            rhel_savings = rhel_247_cost * rhel_discount
+                            
+                            linux_optimized = linux_247_cost * (1 - linux_discount)
+                            rhel_optimized = rhel_247_cost * (1 - rhel_discount)
+                            
+                            savings = linux_savings + rhel_savings
+                            on_demand_optimized = linux_optimized + rhel_optimized + linux_parttime_cost + rhel_parttime_cost
+                            optimized_cost = reserved_cost + on_demand_optimized
+                            
+                            logger.info(f"EC2 Compute SP (RDS ratio fallback {rds_ratio_247*100:.1f}%): Linux savings=${linux_savings:,.2f}, RHEL savings=${rhel_savings:,.2f}, total=${savings:,.2f}")
+                        else:
+                            # No ratio available - apply to all on-demand
+                            linux_savings = linux_on_demand * linux_discount
+                            rhel_savings = rhel_on_demand * rhel_discount
+                            savings = linux_savings + rhel_savings
+                            on_demand_optimized = (linux_on_demand + rhel_on_demand) * (1 - 0.50)
+                            optimized_cost = reserved_cost + on_demand_optimized
                     
-                    # Both use same rate
-                    discount_rate = 0.50
-                    
-                    logger.info(f"EC2 Compute SP (3-yr No Upfront): Linux=${linux_savings:,.2f}, RHEL=${rhel_savings:,.2f}, total=${savings:,.2f}")
-                else:
-                    # Standard calculation for other services
-                    # Optimized cost = reserved (already optimized) + discounted on-demand
-                    optimized_cost = reserved_cost + (on_demand_cost * (1 - discount_rate))
-                    
-                    # Savings only on on-demand portion (skip if amount too small)
-                    if on_demand_cost < 10:  # Skip optimization for costs under $10
-                        savings = 0.0
                     else:
-                        savings = on_demand_cost * discount_rate
+                        # No usage data at all - apply to all on-demand
+                        linux_savings = linux_on_demand * linux_discount
+                        rhel_savings = rhel_on_demand * rhel_discount
+                        
+                        linux_optimized = linux_on_demand * (1 - linux_discount)
+                        rhel_optimized = rhel_on_demand * (1 - rhel_discount)
+                        
+                        savings = linux_savings + rhel_savings
+                        on_demand_optimized = linux_optimized + rhel_optimized
+                        optimized_cost = reserved_cost + on_demand_optimized
+                        
+                        logger.info(f"EC2 Compute SP (no usage data): Linux=${linux_savings:,.2f}, RHEL=${rhel_savings:,.2f}, total=${savings:,.2f}")
+                    
+                    # Use weighted average discount rate for display
+                    discount_rate = 0.50
+                else:
+                    # Standard calculation for other services with 24/7 filtering
+                    # Check if this service has 24/7 usage data
+                    service_247_cost = service_metadata.get(f'{service}_247', 0.0)
+                    service_parttime_cost = service_metadata.get(f'{service}_PARTTIME', 0.0)
+                    
+                    if service_247_cost > 0:
+                        # Calculate ratio of 24/7 vs total from extracted instances
+                        extracted_total = service_247_cost + service_parttime_cost
+                        if extracted_total > 0 and on_demand_cost > 0:
+                            # Apply this ratio to the total on-demand cost
+                            ratio_247 = service_247_cost / extracted_total
+                            actual_247_cost = on_demand_cost * ratio_247
+                            actual_parttime_cost = on_demand_cost * (1 - ratio_247)
+                        else:
+                            # Use extracted values directly
+                            actual_247_cost = service_247_cost
+                            actual_parttime_cost = service_parttime_cost
+                        
+                        # Apply discount only to 24/7 portion
+                        savings_247 = actual_247_cost * discount_rate
+                        optimized_247 = actual_247_cost * (1 - discount_rate)
+                        
+                        savings = savings_247
+                        optimized_cost = reserved_cost + optimized_247 + actual_parttime_cost
+                        
+                        logger.info(f"{service}: Discount to 24/7 (${actual_247_cost:,.2f} @ {ratio_247*100:.1f}%), part-time=${actual_parttime_cost:,.2f}")
+                    else:
+                        # No usage data - standard calculation
+                        # Optimized cost = reserved (already optimized) + discounted on-demand
+                        optimized_cost = reserved_cost + (on_demand_cost * (1 - discount_rate))
+                        
+                        # Savings only on on-demand portion (skip if amount too small)
+                        if on_demand_cost < 10:  # Skip optimization for costs under $10
+                            savings = 0.0
+                        else:
+                            savings = on_demand_cost * discount_rate
                 
                 commitment_type = savings_info.get('commitment', 'N/A')
             
