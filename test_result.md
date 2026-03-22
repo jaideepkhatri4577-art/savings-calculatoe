@@ -238,18 +238,27 @@ frontend:
         agent: "testing"
         comment: "CRITICAL FEATURE VERIFIED: CloudFront flat-rate pricing displays correctly. CloudFront row shows: Original Cost $1,053, Optimized Cost $200, Savings -$853 (81.0% savings). Commitment type 'via Business Plan ($200/month)' is clearly visible in the savings cell. All values match expected calculations from backend."
 
+  - task: "Original Cost Column Breakdown Display"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/components/CalculatorPage.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "Minor: Original Cost column breakdown display verified. RDS shows $3,341 with breakdown '($2,840 compute + $501 Storage)' - missing '0% coverage' text as specified in requirements. EC2 shows $1,449 with complete breakdown '($1,159 compute + $290 EBS, 100% SP coverage)' - PERFECT. CloudFront shows $1,053 without breakdown (correct). The frontend code (lines 311-312) only displays coverage when coverage_percentage > 0, so RDS with 0% coverage doesn't show the coverage text. Core functionality works correctly, but display format doesn't exactly match specification for 0% coverage cases."
+
 metadata:
   created_by: "testing_agent"
   version: "1.0"
-  test_sequence: 3
+  test_sequence: 4
   run_ui: true
 
 test_plan:
   current_focus:
-    - "File Upload via Browse Button"
-    - "Results Page Display with Summary Cards"
-    - "Savings Breakdown Table Display"
-    - "CloudFront Flat-Rate Pricing Display"
+    - "Original Cost Column Breakdown Display"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -261,3 +270,5 @@ agent_communication:
     message: "Completed initial UI verification. AWS Savings Calculator page loads correctly with all visual elements present. Screenshot captured at 1920x800 viewport. Application is ready for functional testing (file upload, results display, etc.). Minor WebSocket HMR error in console does not impact functionality."
   - agent: "testing"
     message: "COMPLETE END-TO-END TEST SUCCESSFUL: Tested full file upload and results display flow. All critical features working: (1) File upload via browse button - working, (2) Results page with summary cards - all visible and correct, (3) Savings breakdown table - all services displayed, (4) CloudFront flat-rate pricing - VERIFIED WORKING with Business Plan ($200/month) showing $853 savings from $1,053 original cost. All test objectives met. Minor WebSocket HMR error persists but does not affect functionality."
+  - agent: "testing"
+    message: "Original Cost Column Breakdown Display Testing Complete: Verified the breakdown display format in the Original Cost column. FINDINGS: (1) RDS: Shows $3,341 with '($2,840 compute + $501 Storage)' but missing '0% coverage' text - Minor issue, (2) EC2: Shows $1,449 with '($1,159 compute + $290 EBS, 100% SP coverage)' - PERFECT match to specification, (3) CloudFront: Shows $1,053 without breakdown - Correct. The issue is that the frontend code only displays coverage percentage when > 0% (line 311: item.coverage_percentage > 0). For services with 0% coverage like RDS, the coverage text is omitted. Core functionality works correctly, but the display format doesn't exactly match the specification for 0% coverage cases. Screenshot captured at 1920x1400 showing full results table."

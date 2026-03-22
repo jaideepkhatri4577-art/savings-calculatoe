@@ -292,8 +292,29 @@ const CalculatorPage = () => {
                             )}
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-right text-gray-300 font-medium">
-                          ${originalCost.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                        <td className="px-6 py-4 text-right">
+                          <div className="flex flex-col items-end">
+                            <span className="text-gray-300 font-medium">
+                              ${originalCost.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                            </span>
+                            {(item.compute_cost || item.storage_cost || item.coverage_percentage > 0) && (
+                              <span className="text-xs text-gray-500 mt-1">
+                                (
+                                {item.compute_cost && item.storage_cost ? (
+                                  <>
+                                    ${item.compute_cost.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} compute + 
+                                    ${item.storage_cost.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} {item.storage_label || 'storage'}
+                                  </>
+                                ) : (
+                                  `$${originalCost.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+                                )}
+                                {item.coverage_percentage > 0 && (
+                                  <>, {item.coverage_percentage.toFixed(0)}% {item.coverage_percentage >= 90 ? 'SP' : 'RI/SP'} coverage</>
+                                )}
+                                )
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-6 py-4 text-right text-white font-medium">
                           ${item.optimized_cost.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}

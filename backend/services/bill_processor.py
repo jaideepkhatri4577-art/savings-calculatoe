@@ -220,14 +220,22 @@ class BillProcessor:
                 service_costs, service_reserved
             )
             
-            # Add original totals and storage info to each item
+            # Add original totals, storage info, and cost breakdown to each item
             for item in savings_breakdown:
                 service_key = item['service'].replace('Compute (', '').replace(')', '')
                 if service_key in service_original_totals:
                     item['original_cost'] = service_original_totals[service_key]
                     item['usage_hours'] = service_usage_hours.get(service_key, 730)
                     
-                    # No overrides - all services running 730h are eligible
+                    # Add storage breakdown for EC2 and RDS
+                    if service_key == 'EC2':
+                        item['compute_cost'] = ec2_compute_total
+                        item['storage_cost'] = ec2_ebs
+                        item['storage_label'] = 'EBS'
+                    elif service_key == 'RDS':
+                        item['compute_cost'] = rds_compute
+                        item['storage_cost'] = rds_storage
+                        item['storage_label'] = 'Storage'
                     
                     # Calculate percentage savings based on original cost
                     if item['original_cost'] > 0:
@@ -306,12 +314,22 @@ class BillProcessor:
                 service_costs, service_reserved
             )
             
-            # Add original totals
+            # Add original totals, storage breakdown, and cost details
             for item in savings_breakdown:
                 service_key = item['service'].replace('Compute (', '').replace(')', '')
                 if service_key in service_original_totals:
                     item['original_cost'] = service_original_totals[service_key]
                     item['usage_hours'] = service_usage_hours.get(service_key, 730)
+                    
+                    # Add storage breakdown for EC2 and RDS
+                    if service_key == 'EC2':
+                        item['compute_cost'] = ec2_compute_total
+                        item['storage_cost'] = ec2_ebs
+                        item['storage_label'] = 'EBS'
+                    elif service_key == 'RDS':
+                        item['compute_cost'] = rds_compute
+                        item['storage_cost'] = rds_storage
+                        item['storage_label'] = 'Storage'
                     
                     if item['original_cost'] > 0:
                         item['savings_percentage'] = (item['savings'] / item['original_cost']) * 100
