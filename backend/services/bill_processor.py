@@ -195,6 +195,40 @@ class BillProcessor:
                                         break
                                 break
                     
+                    # For RDS, OpenSearch, ElastiCache: Extract usage hours to identify 24/7 instances
+                    for service_key in ['RDS', 'OPENSEARCH', 'ELASTICACHE']:
+                        if service_key in service_totals_raw:
+                            service_247_cost = 0.0
+                            service_parttime_cost = 0.0
+                            
+                            # Service-specific instance patterns
+                            if service_key == 'RDS':
+                                instance_pattern = r'db\.\w+.*?([\d,]+\.?\d*)\s*Hrs.*?USD\s+([\d,]+\.?\d*)'
+                            elif service_key == 'OPENSEARCH':
+                                instance_pattern = r'ESNode.*?([\d,]+\.?\d*)\s*Hrs.*?USD\s+([\d,]+\.?\d*)'
+                            elif service_key == 'ELASTICACHE':
+                                instance_pattern = r'cache\.\w+.*?([\d,]+\.?\d*)\s*Hrs.*?USD\s+([\d,]+\.?\d*)'
+                            else:
+                                continue
+                            
+                            # Find all instances with usage hours
+                            for line in full_text.split('\n'):
+                                match = re.search(instance_pattern, line)
+                                if match:
+                                    hours = float(match.group(1).replace(',', ''))
+                                    cost = float(match.group(2).replace(',', ''))
+                                    
+                                    if cost > 1:  # Filter tiny amounts
+                                        if hours >= 720:  # 24/7 instances (≥720h)
+                                            service_247_cost += cost
+                                        else:
+                                            service_parttime_cost += cost
+                            
+                            if service_247_cost > 0:
+                                service_totals_raw[f'{service_key}_247'] = service_247_cost
+                                service_totals_raw[f'{service_key}_PARTTIME'] = service_parttime_cost
+                                logger.info(f"{service_key}: 24/7=${service_247_cost:,.2f}, part-time=${service_parttime_cost:,.2f}")
+                    
                     # Look for Savings Plans coverage on EC2
                     sp_matches = re.findall(r'Savings Plans for AWS Compute usage\s+USD\s+([\d,]+\.?\d*)', full_text)
                     if sp_matches:
@@ -781,8 +815,39 @@ class BillProcessor:
                 # Only calculate savings on the on-demand portion
                 discount_rate = savings_info['discount']
                 
+                # For RDS, OpenSearch, ElastiCache: Only apply RI to 24/7 instances (≥720h)
+                if service in ['RDS', 'OPENSEARCH', 'ELASTICACHE']:
+                    service_247_cost = service_metadata.get(f'{service}_247', 0.0)
+                    service_parttime_cost = service_metadata.get(f'{service}_PARTTIME', 0.0)
+                    
+                    if service_247_cost > 0:
+                        # Calculate ratio of 24/7 vs total from extracted instances
+                        extracted_total = service_247_cost + service_parttime_cost
+                        if extracted_total > 0 and on_demand_cost > 0:
+                            # Apply this ratio to the total on-demand cost
+                            ratio_247 = service_247_cost / extracted_total
+                            actual_247_cost = on_demand_cost * ratio_247
+                            actual_parttime_cost = on_demand_cost * (1 - ratio_247)
+                        else:
+                            # Use extracted values directly
+                            actual_247_cost = service_247_cost
+                            actual_parttime_cost = service_parttime_cost
+                        
+                        # Apply RI discount only to 24/7 portion
+                        savings_247 = actual_247_cost * discount_rate
+                        optimized_247 = actual_247_cost * (1 - discount_rate)
+                        
+                        savings = savings_247
+                        optimized_cost = reserved_cost + optimized_247 + actual_parttime_cost
+                        
+                        logger.info(f"{service}: RI to 24/7 (${actual_247_cost:,.2f} @ {ratio_247*100:.1f}%), part-time=${actual_parttime_cost:,.2f}")
+                    else:
+                        # No usage data - apply to all (fallback)
+                        optimized_cost = reserved_cost + (on_demand_cost * (1 - discount_rate))
+                        savings = on_demand_cost * discount_rate if on_demand_cost >= 10 else 0.0
+                
                 # For EC2 with Linux/RHEL breakdown, apply Compute Savings Plan rates
-                if service == 'EC2' and 'EC2_LINUX_ON_DEMAND' in service_metadata and 'EC2_RHEL_ON_DEMAND' in service_metadata:
+                elif service == 'EC2' and 'EC2_LINUX_ON_DEMAND' in service_metadata and 'EC2_RHEL_ON_DEMAND' in service_metadata:
                     linux_on_demand = service_metadata['EC2_LINUX_ON_DEMAND']
                     rhel_on_demand = service_metadata['EC2_RHEL_ON_DEMAND']
                     

@@ -394,7 +394,13 @@ const CalculatorPage = () => {
                                 </span>
                                 {item.on_demand_portion > 100 && (
                                   <span className="text-xs text-orange-400">
-                                    💡 Apply to ${item.on_demand_portion.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} on-demand spend
+                                    💡 Apply to ${item.on_demand_portion.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} on-demand
+                                  </span>
+                                )}
+                                {/* Show 24/7 filtering for RDS, OpenSearch, ElastiCache */}
+                                {['RDS', 'OpenSearch', 'ElastiCache', 'OPENSEARCH', 'ELASTICACHE'].includes(item.service) && item.savings > 0 && (
+                                  <span className="text-xs text-blue-400">
+                                    ⏰ Only for 24/7 instances (≥720h)
                                   </span>
                                 )}
                                 {item.coverage_percentage >= 90 && (
