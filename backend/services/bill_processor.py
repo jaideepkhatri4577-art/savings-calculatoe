@@ -120,6 +120,7 @@ class BillProcessor:
         try:
             service_costs = {}
             service_reserved = {}  # Track reserved/covered costs
+            service_totals_raw = {}  # Track raw totals before storage split
             total_cost = 0.0
             has_reserved = False
             
@@ -133,31 +134,70 @@ class BillProcessor:
                         
                         # Split into lines and process
                         lines = text.split('\n')
-                        for line in lines:
-                            # Look for service names and costs
-                            service = BillProcessor.identify_service(line)
-                            amount = BillProcessor.extract_amount(line)
-                            is_reserved = BillProcessor.detect_reserved_coverage(line)
-                            is_storage = BillProcessor.is_storage_or_transfer_cost(line)
+                        for i, line in enumerate(lines):
+                            # Skip if line is too short or doesn't have USD
+                            if 'USD' not in line or len(line) < 10:
+                                continue
                             
-                            if service != 'Other' and amount > 0:
-                                if service not in service_costs:
-                                    service_costs[service] = 0.0
-                                    service_reserved[service] = 0.0
-                                
-                                # Skip storage/transfer costs from compute optimization
-                                if is_storage:
-                                    continue
-                                
-                                if is_reserved:
-                                    service_reserved[service] += amount
-                                    has_reserved = True
-                                else:
-                                    service_costs[service] += amount
+                            # Look for AWS service summary lines (format: "Service Name USD amount")
+                            # These typically appear after "Description" headers
+                            service = BillProcessor.identify_service(line)
+                            
+                            if service != 'Other':
+                                # Extract amounts from this line
+                                amounts = re.findall(r'USD\s+([\d,]+\.?\d*)', line)
+                                if amounts:
+                                    # Get the last (usually most significant) amount
+                                    amount = float(amounts[-1].replace(',', ''))
                                     
-                                total_cost += amount
+                                    # Check if it's a main service line (not a sub-item)
+                                    # Main lines usually have the service name near the start
+                                    is_main_line = False
+                                    for keyword_list in BillProcessor.SERVICE_MAPPING.values():
+                                        for keyword in keyword_list:
+                                            if line.strip().startswith(keyword) or line.strip().startswith('Amazon ' + keyword):
+                                                is_main_line = True
+                                                break
+                                    
+                                    # Also check for "Savings Plan" indicators
+                                    is_reserved = BillProcessor.detect_reserved_coverage(line)
+                                    
+                                    if is_main_line and amount > 0:
+                                        if service not in service_totals_raw:
+                                            service_totals_raw[service] = 0.0
+                                            service_costs[service] = 0.0
+                                            service_reserved[service] = 0.0
+                                        
+                                        # For main service lines, use the amount as total
+                                        # Only take the largest value for each service (avoid duplicates)
+                                        if amount > service_totals_raw[service]:
+                                            service_totals_raw[service] = amount
+                                            
+                                            if is_reserved:
+                                                service_reserved[service] = amount
+                                                has_reserved = True
+                                            else:
+                                                service_costs[service] = amount
+                            
+                            # Also look for explicit "Savings Plans for AWS Compute" lines
+                            if 'Savings Plans for AWS Compute' in line or 'Savings Plan' in line:
+                                amounts = re.findall(r'USD\s+([\d,]+\.?\d*)', line)
+                                if amounts:
+                                    amount = float(amounts[-1].replace(',', ''))
+                                    if amount > 100:  # Significant savings amount
+                                        if 'EC2' not in service_reserved:
+                                            service_reserved['EC2'] = 0.0
+                                        # Track EC2 savings plan coverage
+                                        service_reserved['EC2'] = max(service_reserved['EC2'], amount)
+                                        has_reserved = True
+                            
             except Exception as pdf_error:
                 logger.warning(f"Could not parse PDF properly: {str(pdf_error)}, using mock data")
+            
+            # Recalculate total from parsed services
+            if service_totals_raw:
+                total_cost = sum(service_totals_raw.values())
+                logger.info(f"Parsed {len(service_totals_raw)} services from PDF, total: ${total_cost:,.2f}")
             
             # Calculate storage breakdown for parsed data
             # RDS: ~15% is storage (not optimizable)
