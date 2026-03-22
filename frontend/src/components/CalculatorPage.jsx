@@ -177,7 +177,8 @@ const CalculatorPage = () => {
         coverage: item.coverage || 'On-demand',
         coveragePercentage: item.coverage_percentage || 0,
         reservedPortion: item.reserved_portion || 0,
-        onDemandPortion: item.on_demand_portion || 0
+        onDemandPortion: item.on_demand_portion || 0,
+        commitmentType: item.commitment_type || 'N/A'
       }));
     }
     return calculateSavings();
@@ -554,6 +555,11 @@ const CalculatorPage = () => {
                               <span className="text-sm text-green-400 font-medium">
                                 ({(item.savingsPercentage || ((item.savings / (item.originalCost || item.onDemand)) * 100)).toFixed(1)}% savings)
                               </span>
+                              {item.commitmentType && item.commitmentType !== 'N/A' && item.savings > 0 && (
+                                <span className="text-xs text-gray-500 mt-1">
+                                  via {item.commitmentType}
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td className="px-6 py-4 text-center">

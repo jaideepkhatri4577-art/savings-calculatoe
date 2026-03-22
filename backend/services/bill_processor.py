@@ -26,21 +26,22 @@ class BillProcessor:
         'cloudfront': ['CloudFront', 'Amazon CloudFront'],
     }
     
-    # Savings rates based on industry standards
+    # Savings rates based on AWS Reserved Instances and Savings Plans
+    # RDS and ElastiCache: 1-year No Upfront Reserved Instances
     SAVINGS_RATES = {
-        'EC2': {'discount': 0.56, 'label': 'Compute (EC2)'},
-        'RDS': {'discount': 0.35, 'label': 'RDS'},
-        'Lambda': {'discount': 0.12, 'label': 'Lambda'},
-        'ElastiCache': {'discount': 0.30, 'label': 'ElastiCache'},  # Updated to 30%
-        'OpenSearch': {'discount': 0.35, 'label': 'OpenSearch'},
-        'Redshift': {'discount': 0.38, 'label': 'Redshift'},
-        'ECS': {'discount': 0.45, 'label': 'ECS'},
-        'Fargate': {'discount': 0.40, 'label': 'Fargate'},
-        'S3': {'discount': 0.15, 'label': 'S3'},
-        'DynamoDB': {'discount': 0.25, 'label': 'DynamoDB'},
-        'CloudFront': {'discount': 0.30, 'label': 'CloudFront'},
-        'WAF': {'discount': 0.00, 'label': 'WAF'},  # Not optimizable
-        'Data Transfer': {'discount': 0.00, 'label': 'Data Transfer'},  # Not optimizable
+        'EC2': {'discount': 0.56, 'label': 'Compute (EC2)', 'commitment': '3-year Compute SP'},
+        'RDS': {'discount': 0.40, 'label': 'RDS', 'commitment': '1-year No Upfront RI'},
+        'Lambda': {'discount': 0.12, 'label': 'Lambda', 'commitment': 'Compute SP'},
+        'ElastiCache': {'discount': 0.35, 'label': 'ElastiCache', 'commitment': '1-year No Upfront RI'},
+        'OpenSearch': {'discount': 0.35, 'label': 'OpenSearch', 'commitment': '1-year RI'},
+        'Redshift': {'discount': 0.38, 'label': 'Redshift', 'commitment': '1-year RI'},
+        'ECS': {'discount': 0.45, 'label': 'ECS', 'commitment': 'Compute SP'},
+        'Fargate': {'discount': 0.40, 'label': 'Fargate', 'commitment': 'Compute SP'},
+        'S3': {'discount': 0.15, 'label': 'S3', 'commitment': 'Intelligent-Tiering'},
+        'DynamoDB': {'discount': 0.25, 'label': 'DynamoDB', 'commitment': 'Reserved Capacity'},
+        'CloudFront': {'discount': 0.30, 'label': 'CloudFront', 'commitment': 'Savings Bundle'},
+        'WAF': {'discount': 0.00, 'label': 'WAF', 'commitment': 'N/A'},
+        'Data Transfer': {'discount': 0.00, 'label': 'Data Transfer', 'commitment': 'N/A'},
     }
     
     @staticmethod
@@ -457,7 +458,8 @@ class BillProcessor:
                 'savings': round(savings, 2),
                 'discount_percentage': round(discount_rate * 100, 1),
                 'coverage': coverage_status,
-                'coverage_percentage': round(coverage_pct, 1)
+                'coverage_percentage': round(coverage_pct, 1),
+                'commitment_type': savings_info.get('commitment', 'N/A')
             })
         
         # Sort by total cost (highest first) - this matches user's screenshot
