@@ -26,21 +26,23 @@ class BillProcessor:
         'cloudfront': ['CloudFront', 'Amazon CloudFront'],
     }
     
-    # AWS Savings rates - Updated with 2025 official AWS pricing
-    # Source: https://aws.amazon.com/savingsplans/compute-pricing/ and AWS RI pricing pages
+    # AWS Savings rates - Updated with official 2025 AWS pricing
+    # Source: AWS official pricing pages (January 2025)
+    # EC2/Lambda/Fargate: Compute Savings Plans (https://aws.amazon.com/savingsplans/compute-pricing/)
+    # Other services: 1-year No Upfront Reserved Instances
     SAVINGS_RATES = {
-        'EC2': {'discount': 0.60, 'label': 'Compute (EC2)', 'commitment': '3-year Standard RI'},
-        'EC2_LINUX': {'discount': 0.60, 'label': 'EC2 Linux', 'commitment': '3-year Standard RI (All Upfront)'},
-        'EC2_RHEL': {'discount': 0.54, 'label': 'EC2 RHEL', 'commitment': '3-year Standard RI (RHEL license cost reduces discount)'},
+        'EC2': {'discount': 0.30, 'label': 'Compute (EC2)', 'commitment': '1-year Compute SP (No Upfront)'},
+        'EC2_LINUX': {'discount': 0.30, 'label': 'EC2 Linux', 'commitment': '1-year Compute SP (No Upfront)'},
+        'EC2_RHEL': {'discount': 0.30, 'label': 'EC2 RHEL', 'commitment': '1-year Compute SP (No Upfront)'},
         'RDS': {'discount': 0.40, 'label': 'RDS', 'commitment': '1-year No Upfront RI'},
-        'LAMBDA': {'discount': 0.17, 'label': 'Lambda', 'commitment': 'Compute SP (up to 17%)'},
-        'ELASTICACHE': {'discount': 0.55, 'label': 'ElastiCache', 'commitment': '3-year Standard RI'},
-        'OPENSEARCH': {'discount': 0.48, 'label': 'OpenSearch', 'commitment': '3-year Standard RI'},
-        'REDSHIFT': {'discount': 0.56, 'label': 'Redshift', 'commitment': '3-year Standard RI'},
-        'ECS': {'discount': 0.52, 'label': 'ECS', 'commitment': 'Compute SP'},
-        'FARGATE': {'discount': 0.52, 'label': 'Fargate', 'commitment': 'Compute SP (up to 52%)'},
+        'LAMBDA': {'discount': 0.17, 'label': 'Lambda', 'commitment': '1-year Compute SP'},
+        'ELASTICACHE': {'discount': 0.48, 'label': 'ElastiCache', 'commitment': '1-year No Upfront RI'},
+        'OPENSEARCH': {'discount': 0.31, 'label': 'OpenSearch', 'commitment': '1-year No Upfront RI'},
+        'REDSHIFT': {'discount': 0.40, 'label': 'Redshift', 'commitment': '1-year No Upfront RI'},
+        'ECS': {'discount': 0.30, 'label': 'ECS', 'commitment': '1-year Compute SP'},
+        'FARGATE': {'discount': 0.30, 'label': 'Fargate', 'commitment': '1-year Compute SP'},
         'S3': {'discount': 0.15, 'label': 'S3', 'commitment': 'Intelligent-Tiering'},
-        'DYNAMODB': {'discount': 0.43, 'label': 'DynamoDB', 'commitment': '3-year Reserved Capacity'},
+        'DYNAMODB': {'discount': 0.35, 'label': 'DynamoDB', 'commitment': '1-year Reserved Capacity'},
         'CLOUDFRONT': {'discount': 0.0, 'label': 'CloudFront', 'commitment': 'Flat-rate Plan', 'flat_rate': True},
         'WAF': {'discount': 0.00, 'label': 'WAF', 'commitment': 'N/A'},
         'DATA TRANSFER': {'discount': 0.00, 'label': 'Data Transfer', 'commitment': 'N/A'},
@@ -780,16 +782,15 @@ class BillProcessor:
                 # Only calculate savings on the on-demand portion
                 discount_rate = savings_info['discount']
                 
-                # For EC2 with Linux/RHEL breakdown, apply different rates
+                # For EC2 with Linux/RHEL breakdown, apply Compute Savings Plan rates
                 if service == 'EC2' and 'EC2_LINUX_ON_DEMAND' in service_metadata and 'EC2_RHEL_ON_DEMAND' in service_metadata:
                     linux_on_demand = service_metadata['EC2_LINUX_ON_DEMAND']
                     rhel_on_demand = service_metadata['EC2_RHEL_ON_DEMAND']
                     
-                    # AWS 2025 official discount rates:
-                    # Linux: 60% (3-year Standard RI, All Upfront)
-                    # RHEL: 54% (3-year Standard RI, RHEL license cost reduces discount)
-                    linux_discount = 0.60
-                    rhel_discount = 0.54
+                    # AWS Compute Savings Plans (1-year No Upfront): 30% for both Linux and RHEL
+                    # Compute SP applies uniformly across instance types and OS
+                    linux_discount = 0.30
+                    rhel_discount = 0.30
                     
                     linux_savings = linux_on_demand * linux_discount
                     rhel_savings = rhel_on_demand * rhel_discount
@@ -801,11 +802,10 @@ class BillProcessor:
                     on_demand_optimized = linux_optimized + rhel_optimized
                     optimized_cost = reserved_cost + on_demand_optimized
                     
-                    # Weighted average discount
-                    if on_demand_cost > 0:
-                        discount_rate = savings / on_demand_cost
+                    # Both use same rate, so discount_rate = 30%
+                    discount_rate = 0.30
                     
-                    logger.info(f"EC2 split savings: Linux=${linux_savings:,.2f} (60%), RHEL=${rhel_savings:,.2f} (54%), total=${savings:,.2f}")
+                    logger.info(f"EC2 Compute SP savings: Linux=${linux_savings:,.2f} (30%), RHEL=${rhel_savings:,.2f} (30%), total=${savings:,.2f}")
                 else:
                     # Standard calculation for other services
                     # Optimized cost = reserved (already optimized) + discounted on-demand
