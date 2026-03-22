@@ -417,13 +417,6 @@ const CalculatorPage = () => {
                                     Apply to ${item.on_demand_portion.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} on-demand
                                   </span>
                                 )}
-                                {/* Show 24/7 filtering for all eligible services */}
-                                {item.savings > 0 && item.commitment_type && !item.commitment_type.includes('Flat-rate') && !item.commitment_type.includes('N/A') && !item.commitment_type.includes('Intelligent-Tiering') && (
-                                  <span className="text-xs text-blue-400 flex items-center gap-1">
-                                    <span className="text-sm">⏰</span>
-                                    Only for 24/7 instances (≥720h)
-                                  </span>
-                                )}
                                 {item.coverage_percentage >= 90 && (
                                   <span className="text-xs text-blue-400 flex items-center gap-1">
                                     <CheckCircle className="w-3 h-3" />
