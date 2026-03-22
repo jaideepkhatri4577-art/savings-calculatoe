@@ -26,19 +26,21 @@ class BillProcessor:
         'cloudfront': ['CloudFront', 'Amazon CloudFront'],
     }
     
-    # Savings rates based on AWS Reserved Instances and Savings Plans
-    # CloudFront: Flat-rate pricing plans (actual AWS pricing)
+    # AWS Savings rates - Updated with 2025 official AWS pricing
+    # Source: https://aws.amazon.com/savingsplans/compute-pricing/ and AWS RI pricing pages
     SAVINGS_RATES = {
-        'EC2': {'discount': 0.56, 'label': 'Compute (EC2)', 'commitment': '3-year Compute SP'},
+        'EC2': {'discount': 0.60, 'label': 'Compute (EC2)', 'commitment': '3-year Standard RI'},
+        'EC2_LINUX': {'discount': 0.60, 'label': 'EC2 Linux', 'commitment': '3-year Standard RI (All Upfront)'},
+        'EC2_RHEL': {'discount': 0.54, 'label': 'EC2 RHEL', 'commitment': '3-year Standard RI (RHEL license cost reduces discount)'},
         'RDS': {'discount': 0.40, 'label': 'RDS', 'commitment': '1-year No Upfront RI'},
-        'LAMBDA': {'discount': 0.12, 'label': 'Lambda', 'commitment': 'Compute SP'},
-        'ELASTICACHE': {'discount': 0.35, 'label': 'ElastiCache', 'commitment': '1-year No Upfront RI'},
-        'OPENSEARCH': {'discount': 0.35, 'label': 'OpenSearch', 'commitment': '1-year RI'},
-        'REDSHIFT': {'discount': 0.38, 'label': 'Redshift', 'commitment': '1-year RI'},
-        'ECS': {'discount': 0.45, 'label': 'ECS', 'commitment': 'Compute SP'},
-        'FARGATE': {'discount': 0.40, 'label': 'Fargate', 'commitment': 'Compute SP'},
+        'LAMBDA': {'discount': 0.17, 'label': 'Lambda', 'commitment': 'Compute SP (up to 17%)'},
+        'ELASTICACHE': {'discount': 0.55, 'label': 'ElastiCache', 'commitment': '3-year Standard RI'},
+        'OPENSEARCH': {'discount': 0.48, 'label': 'OpenSearch', 'commitment': '3-year Standard RI'},
+        'REDSHIFT': {'discount': 0.56, 'label': 'Redshift', 'commitment': '3-year Standard RI'},
+        'ECS': {'discount': 0.52, 'label': 'ECS', 'commitment': 'Compute SP'},
+        'FARGATE': {'discount': 0.52, 'label': 'Fargate', 'commitment': 'Compute SP (up to 52%)'},
         'S3': {'discount': 0.15, 'label': 'S3', 'commitment': 'Intelligent-Tiering'},
-        'DYNAMODB': {'discount': 0.25, 'label': 'DynamoDB', 'commitment': 'Reserved Capacity'},
+        'DYNAMODB': {'discount': 0.43, 'label': 'DynamoDB', 'commitment': '3-year Reserved Capacity'},
         'CLOUDFRONT': {'discount': 0.0, 'label': 'CloudFront', 'commitment': 'Flat-rate Plan', 'flat_rate': True},
         'WAF': {'discount': 0.00, 'label': 'WAF', 'commitment': 'N/A'},
         'DATA TRANSFER': {'discount': 0.00, 'label': 'Data Transfer', 'commitment': 'N/A'},
@@ -783,9 +785,11 @@ class BillProcessor:
                     linux_on_demand = service_metadata['EC2_LINUX_ON_DEMAND']
                     rhel_on_demand = service_metadata['EC2_RHEL_ON_DEMAND']
                     
-                    # AWS discount rates: Linux 56%, RHEL 40% (RHEL license costs reduce discount)
-                    linux_discount = 0.56
-                    rhel_discount = 0.40
+                    # AWS 2025 official discount rates:
+                    # Linux: 60% (3-year Standard RI, All Upfront)
+                    # RHEL: 54% (3-year Standard RI, RHEL license cost reduces discount)
+                    linux_discount = 0.60
+                    rhel_discount = 0.54
                     
                     linux_savings = linux_on_demand * linux_discount
                     rhel_savings = rhel_on_demand * rhel_discount
@@ -801,7 +805,7 @@ class BillProcessor:
                     if on_demand_cost > 0:
                         discount_rate = savings / on_demand_cost
                     
-                    logger.info(f"EC2 split savings: Linux=${linux_savings:,.2f} (56%), RHEL=${rhel_savings:,.2f} (40%), total=${savings:,.2f}")
+                    logger.info(f"EC2 split savings: Linux=${linux_savings:,.2f} (60%), RHEL=${rhel_savings:,.2f} (54%), total=${savings:,.2f}")
                 else:
                     # Standard calculation for other services
                     # Optimized cost = reserved (already optimized) + discounted on-demand

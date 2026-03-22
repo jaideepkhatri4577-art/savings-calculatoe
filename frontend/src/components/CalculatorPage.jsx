@@ -221,11 +221,11 @@ const CalculatorPage = () => {
               </div>
               
               <div className="bg-zinc-950 border border-green-500/30 rounded-lg p-6">
-                <h3 className="text-sm text-gray-400 mb-2 uppercase tracking-wide">Optimized Cost</h3>
+                <h3 className="text-sm text-gray-400 mb-2 uppercase tracking-wide">Projected Cost</h3>
                 <div className="text-3xl font-bold text-green-500">
                   ${resultsData?.optimized_spend?.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) || 0}
                 </div>
-                <p className="text-xs text-gray-500 mt-2">With RI/SP optimization</p>
+                <p className="text-xs text-green-400 mt-2">↓ {resultsData?.savings_percentage || 0}% with RI/SP</p>
               </div>
               
               <div className="bg-zinc-950 border border-orange-500/30 rounded-lg p-6">
@@ -233,7 +233,7 @@ const CalculatorPage = () => {
                 <div className="text-3xl font-bold text-orange-500">
                   ${resultsData?.monthly_savings?.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) || 0}
                 </div>
-                <p className="text-xs text-gray-500 mt-2">Potential reduction</p>
+                <p className="text-xs text-gray-500 mt-2">Per month</p>
               </div>
               
               <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-6">
@@ -242,6 +242,24 @@ const CalculatorPage = () => {
                   ${resultsData?.annual_savings?.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) || 0}
                 </div>
                 <p className="text-xs text-gray-500 mt-2">Per year</p>
+              </div>
+            </div>
+            
+            {/* Projection Details Banner */}
+            <div className="bg-gradient-to-r from-green-500/10 to-orange-500/10 border border-green-500/20 rounded-lg p-6 mb-8">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-white mb-2">💡 Savings Projection with AWS RI & Savings Plans</h3>
+                  <p className="text-gray-400 text-sm">
+                    By applying Reserved Instances and Savings Plans across your services, you can reduce your monthly AWS bill from{' '}
+                    <span className="text-white font-semibold">${resultsData?.current_spend?.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+                    {' '}to{' '}
+                    <span className="text-green-400 font-semibold">${resultsData?.optimized_spend?.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+                    {' '}— saving{' '}
+                    <span className="text-orange-400 font-semibold">${resultsData?.monthly_savings?.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}/month</span>
+                    {' '}({resultsData?.savings_percentage}% reduction).
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -273,7 +291,7 @@ const CalculatorPage = () => {
                   <tr className="border-b border-zinc-800">
                     <th className="px-6 py-4 text-left text-sm font-medium text-gray-400">Service</th>
                     <th className="px-6 py-4 text-right text-sm font-medium text-gray-400">Original Cost</th>
-                    <th className="px-6 py-4 text-right text-sm font-medium text-gray-400">Optimized Cost</th>
+                    <th className="px-6 py-4 text-right text-sm font-medium text-gray-400">Projected Cost</th>
                     <th className="px-6 py-4 text-right text-sm font-medium text-gray-400">Savings</th>
                     <th className="px-6 py-4 text-center text-sm font-medium text-gray-400">Coverage</th>
                   </tr>
