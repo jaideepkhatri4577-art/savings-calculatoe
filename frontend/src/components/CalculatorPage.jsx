@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Upload, FileText, HelpCircle, CheckCircle, TrendingDown } from 'lucide-react';
+import { Upload, FileText, CheckCircle, TrendingDown, Download } from 'lucide-react';
 import { Button } from './ui/button';
 import {
   Accordion,
@@ -109,6 +109,38 @@ const CalculatorPage = () => {
     }
   };
 
+  const downloadExcel = () => {
+    const breakdown = getBreakdownData();
+    const totals = getTotalSavings();
+    
+    // Create CSV content
+    let csvContent = "AWS Savings Calculator Results\n\n";
+    csvContent += "Summary\n";
+    csvContent += `Current Spend,$${totals.monthly.toLocaleString()}/month\n`;
+    csvContent += `Monthly Savings,$${totals.monthly.toLocaleString()}\n`;
+    csvContent += `Annual Savings,$${totals.annual.toLocaleString()}\n`;
+    csvContent += `Reduction,${totals.percentage.toFixed(1)}%\n\n`;
+    
+    csvContent += "Service Breakdown\n";
+    csvContent += "Service,Original Cost,Optimized Cost,Savings,Savings %,Coverage,Commitment Type\n";
+    
+    breakdown.forEach(item => {
+      const savingsPct = item.savingsPercentage || ((item.savings / (item.originalCost || item.onDemand)) * 100);
+      csvContent += `${item.service},$${(item.originalCost || item.onDemand).toFixed(2)},$${item.optimized.toFixed(2)},$${item.savings.toFixed(2)},${savingsPct.toFixed(1)}%,${item.coverage},${item.commitmentType || 'N/A'}\n`;
+    });
+    
+    // Create and download file
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'aws-savings-analysis.csv');
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const calculateSavings = () => {
     const spend = parseFloat(monthlySpend) || 10000;
     const services = selectedServices.length > 0 ? selectedServices : ['EC2', 'Lambda', 'RDS'];
@@ -188,34 +220,31 @@ const CalculatorPage = () => {
   return (
     <div className="min-h-screen bg-black text-white">
       {!showResults ? (
-        <>
-          {/* Hero Section */}
-          <div className="pt-32 pb-12 px-6">
-            <div className="container mx-auto max-w-4xl text-center">
-              <h1 className="text-5xl md:text-6xl font-bold mb-6 leading-tight">
-                See how much MilkStraw AI<br />can save you
-              </h1>
-              <p className="text-gray-400 text-lg">
-                Trusted by more than 1000 cloud engineers
-              </p>
+        <div className="flex items-center justify-center min-h-screen p-6">
+          <div className="w-full max-w-4xl">
+            {/* Tabs */}
+            <div className="flex gap-0 mb-8">
+              <button
+                onClick={() => setActiveTab('upload')}
+                className={`flex-1 py-4 px-6 text-center transition-all relative ${
+                  activeTab === 'upload'
+                    ? 'text-orange-500 border-b-2 border-orange-500'
+                    : 'text-gray-400 border-b border-zinc-800 hover:text-gray-300'
+                }`}
+              >
+                Upload your bill
+              </button>
+              <button
+                onClick={() => setActiveTab('manual')}
+                className={`flex-1 py-4 px-6 text-center transition-all relative ${
+                  activeTab === 'manual'
+                    ? 'text-orange-500 border-b-2 border-orange-500'
+                    : 'text-gray-400 border-b border-zinc-800 hover:text-gray-300'
+                }`}
+              >
+                Estimate manually
+              </button>
             </div>
-          </div>
-
-      {/* Calculator Section */}
-      <div className="px-6 pb-20">
-        <div className="container mx-auto max-w-4xl">
-          {/* Tabs */}
-          <div className="flex gap-0 mb-8">
-            <button
-              onClick={() => setActiveTab('upload')}
-              className={`flex-1 py-4 px-6 text-center transition-all relative ${
-                activeTab === 'upload'
-                  ? 'text-orange-500 border-b-2 border-orange-500'
-                  : 'text-gray-400 border-b border-zinc-800 hover:text-gray-300'
-              }`}
-            >
-              Upload your bill
-            </button>
             <button
               onClick={() => setActiveTab('manual')}
               className={`flex-1 py-4 px-6 text-center transition-all relative ${
@@ -589,12 +618,13 @@ const CalculatorPage = () => {
 
               {/* CTA Section */}
               <div className="text-center">
-                <p className="text-gray-400 mb-6">
-                  Ready to start saving on your AWS costs?
-                </p>
-                <div className="flex gap-4 justify-center mb-6">
-                  <Button className="bg-orange-600 hover:bg-orange-700 text-white px-8 py-3 rounded-lg font-medium transition-colors">
-                    Get Started Free
+                <div className="flex gap-4 justify-center">
+                  <Button 
+                    onClick={downloadExcel}
+                    className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-medium transition-colors flex items-center gap-2"
+                  >
+                    <Download className="w-5 h-5" />
+                    Download Excel Report
                   </Button>
                   <Button 
                     onClick={() => {
@@ -610,19 +640,10 @@ const CalculatorPage = () => {
                     Calculate Again
                   </Button>
                 </div>
-                <p className="text-sm text-gray-500">
-                  No credit card required • Free for startups on AWS credits
-                </p>
               </div>
             </div>
           </div>
-
-          {/* Help Button */}
-          <button className="fixed bottom-6 right-6 bg-white text-black rounded-full px-6 py-3 flex items-center gap-2 shadow-lg hover:shadow-xl transition-all hover:scale-105">
-            <HelpCircle className="w-5 h-5" />
-            <span className="font-medium">Get help</span>
-          </button>
-        </>
+        </div>
       )}
     </div>
   );
