@@ -168,9 +168,11 @@ const CalculatorPage = () => {
     if (resultsData && resultsData.breakdown) {
       return resultsData.breakdown.map(item => ({
         service: item.service,
+        originalCost: item.original_cost || item.on_demand_cost,
         onDemand: item.on_demand_cost,
         optimized: item.optimized_cost,
         savings: item.savings,
+        savingsPercentage: item.savings_percentage || ((item.savings / (item.original_cost || item.on_demand_cost)) * 100),
         discount: item.discount_percentage,
         coverage: item.coverage || 'On-demand',
         coveragePercentage: item.coverage_percentage || 0,
@@ -510,9 +512,9 @@ const CalculatorPage = () => {
                     <thead>
                       <tr className="border-b border-zinc-800">
                         <th className="px-6 py-4 text-left text-sm font-medium text-gray-400">Service</th>
-                        <th className="px-6 py-4 text-right text-sm font-medium text-gray-400">Current Cost</th>
+                        <th className="px-6 py-4 text-right text-sm font-medium text-gray-400">Original Cost</th>
                         <th className="px-6 py-4 text-right text-sm font-medium text-gray-400">Optimized Cost</th>
-                        <th className="px-6 py-4 text-right text-sm font-medium text-gray-400">Potential Savings</th>
+                        <th className="px-6 py-4 text-right text-sm font-medium text-gray-400">Savings</th>
                         <th className="px-6 py-4 text-center text-sm font-medium text-gray-400">Coverage</th>
                       </tr>
                     </thead>
@@ -531,12 +533,12 @@ const CalculatorPage = () => {
                           </td>
                           <td className="px-6 py-4 text-right">
                             <div className="flex flex-col items-end">
-                              <span className="text-gray-300">
-                                ${item.onDemand.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                              <span className="text-gray-300 font-medium">
+                                ${(item.originalCost || item.onDemand).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                               </span>
-                              {item.onDemandPortion > 0 && item.reservedPortion > 0 && (
+                              {item.reservedPortion > 0 && (
                                 <span className="text-xs text-gray-500 mt-1">
-                                  ${item.onDemandPortion.toLocaleString()} on-demand
+                                  (${item.onDemandPortion.toLocaleString()} compute)
                                 </span>
                               )}
                             </div>
@@ -546,11 +548,11 @@ const CalculatorPage = () => {
                           </td>
                           <td className="px-6 py-4 text-right">
                             <div className="flex flex-col items-end">
-                              <span className="text-green-500 font-semibold">
+                              <span className="text-green-500 font-semibold text-lg">
                                 -${item.savings.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                               </span>
-                              <span className="text-xs text-gray-500">
-                                (-{item.discount.toFixed(0)}%)
+                              <span className="text-sm text-green-400 font-medium">
+                                ({(item.savingsPercentage || ((item.savings / (item.originalCost || item.onDemand)) * 100)).toFixed(1)}% savings)
                               </span>
                             </div>
                           </td>
