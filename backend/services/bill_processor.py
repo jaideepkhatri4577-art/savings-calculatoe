@@ -152,20 +152,23 @@ class BillProcessor:
                     }
                     
                     # Extract total bill amount (for display in Current Spend)
-                    # Try multiple patterns to find the grand total
+                    # Strategy: Use the largest "Total pre-tax" from service providers (excludes marketplace/misc charges)
                     total_bill_amount = 0.0
                     
-                    # Pattern 1: Grand total (most reliable)
-                    total_bill_match = re.search(r'Grand total:\s*USD\s*([\d,]+\.?\d*)', full_text, re.IGNORECASE)
-                    if total_bill_match:
-                        total_bill_amount = float(total_bill_match.group(1).replace(',', ''))
-                        logger.info(f"Found total bill amount (Grand total): ${total_bill_amount:,.2f}")
-                    else:
-                        # Pattern 2: Service provider total (fallback)
-                        total_bill_match = re.search(r'(?:EMEA SARL|Amazon Web Services, Inc\.)\s+\(\d+\)\s+Total pre-tax USD\s+([\d,]+\.?\d*)', full_text)
-                        if total_bill_match:
-                            total_bill_amount = float(total_bill_match.group(1).replace(',', ''))
-                            logger.info(f"Found total bill amount (Service provider): ${total_bill_amount:,.2f}")
+                    # Pattern 1: Find all service provider "Total pre-tax" amounts
+                    provider_totals = re.findall(r'Amazon Web Services.*?\(\d+\)\s+Total pre-tax USD\s*([\d,]+\.?\d*)', full_text, re.IGNORECASE)
+                    if provider_totals:
+                        # Use the largest pre-tax amount (main AWS services)
+                        provider_amounts = [float(amt.replace(',', '')) for amt in provider_totals]
+                        total_bill_amount = max(provider_amounts)
+                        logger.info(f"Found total bill amount (Total pre-tax, largest): ${total_bill_amount:,.2f}")
+                    
+                    # Pattern 2: Grand total (fallback if no service provider totals found)
+                    if total_bill_amount == 0:
+                        grand_total_match = re.search(r'Grand total:\s*USD\s*([\d,]+\.?\d*)', full_text, re.IGNORECASE)
+                        if grand_total_match:
+                            total_bill_amount = float(grand_total_match.group(1).replace(',', ''))
+                            logger.info(f"Found total bill amount (Grand total fallback): ${total_bill_amount:,.2f}")
                     
                     # Parse Linux vs RHEL vs Windows EC2 instances separately
                     ec2_linux_total = 0.0
