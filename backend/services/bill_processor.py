@@ -152,11 +152,20 @@ class BillProcessor:
                     }
                     
                     # Extract total bill amount (for display in Current Spend)
-                    total_bill_match = re.search(r'(?:EMEA SARL|Amazon Web Services, Inc\.)\s+\(\d+\)\s+Total pre-tax USD\s+([\d,]+\.?\d*)', full_text)
+                    # Try multiple patterns to find the grand total
                     total_bill_amount = 0.0
+                    
+                    # Pattern 1: Grand total (most reliable)
+                    total_bill_match = re.search(r'Grand total:\s*USD\s*([\d,]+\.?\d*)', full_text, re.IGNORECASE)
                     if total_bill_match:
                         total_bill_amount = float(total_bill_match.group(1).replace(',', ''))
-                        logger.info(f"Found total bill amount: ${total_bill_amount:,.2f}")
+                        logger.info(f"Found total bill amount (Grand total): ${total_bill_amount:,.2f}")
+                    else:
+                        # Pattern 2: Service provider total (fallback)
+                        total_bill_match = re.search(r'(?:EMEA SARL|Amazon Web Services, Inc\.)\s+\(\d+\)\s+Total pre-tax USD\s+([\d,]+\.?\d*)', full_text)
+                        if total_bill_match:
+                            total_bill_amount = float(total_bill_match.group(1).replace(',', ''))
+                            logger.info(f"Found total bill amount (Service provider): ${total_bill_amount:,.2f}")
                     
                     # Parse Linux vs RHEL vs Windows EC2 instances separately
                     ec2_linux_total = 0.0
