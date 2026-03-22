@@ -211,13 +211,21 @@ const CalculatorPage = () => {
             </div>
             
             {/* Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
               <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-6">
-                <h3 className="text-sm text-gray-400 mb-2 uppercase tracking-wide">Current Spend</h3>
+                <h3 className="text-sm text-gray-400 mb-2 uppercase tracking-wide">Total Bill</h3>
                 <div className="text-3xl font-bold text-white">
                   ${resultsData?.current_spend?.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) || 0}
                 </div>
-                <p className="text-xs text-gray-500 mt-2">On-demand pricing</p>
+                <p className="text-xs text-gray-500 mt-2">Current monthly spend</p>
+              </div>
+              
+              <div className="bg-zinc-950 border border-green-500/30 rounded-lg p-6">
+                <h3 className="text-sm text-gray-400 mb-2 uppercase tracking-wide">Optimized Cost</h3>
+                <div className="text-3xl font-bold text-green-500">
+                  ${resultsData?.optimized_spend?.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) || 0}
+                </div>
+                <p className="text-xs text-gray-500 mt-2">With RI/SP optimization</p>
               </div>
               
               <div className="bg-zinc-950 border border-orange-500/30 rounded-lg p-6">
@@ -317,6 +325,13 @@ const CalculatorPage = () => {
                                   </>
                                 )}
                                 )
+                              </span>
+                            )}
+                            {/* Show Linux/RHEL breakdown for EC2 */}
+                            {item.service === 'Compute (EC2)' && (item.linux_cost || item.rhel_cost) && (
+                              <span className="text-xs text-blue-400 mt-1">
+                                Linux: ${item.linux_cost?.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) || 0}, 
+                                RHEL: ${item.rhel_cost?.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) || 0}
                               </span>
                             )}
                           </div>

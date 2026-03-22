@@ -96,13 +96,16 @@ async def calculate_savings(file: UploadFile = File(...)):
         # Calculate totals
         total_savings = sum(item['savings'] for item in result['savings_breakdown'])
         total_on_demand = sum(item['on_demand_cost'] for item in result['savings_breakdown'])
+        total_bill = result.get('total_bill_amount', total_on_demand)
+        optimized_total = total_bill - total_savings
         
         return {
             'success': True,
-            'current_spend': round(total_on_demand, 2),
+            'current_spend': round(total_bill, 2),  # Show total bill amount
+            'optimized_spend': round(optimized_total, 2),  # Projection after savings
             'monthly_savings': round(total_savings, 2),
             'annual_savings': round(total_savings * 12, 2),
-            'savings_percentage': round((total_savings / total_on_demand * 100), 1) if total_on_demand > 0 else 0,
+            'savings_percentage': round((total_savings / total_bill * 100), 1) if total_bill > 0 else 0,
             'breakdown': result['savings_breakdown'],
             'has_reserved_instances': any(item.get('coverage') != 'On-demand' for item in result['savings_breakdown'])
         }

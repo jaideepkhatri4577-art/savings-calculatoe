@@ -148,6 +148,30 @@ class BillProcessor:
                         'ELASTICACHE': [r'ElastiCache\s+USD\s+([\d,]+\.?\d*)'],
                     }
                     
+                    # Extract total bill amount (for display in Current Spend)
+                    total_bill_match = re.search(r'(?:EMEA SARL|Amazon Web Services, Inc\.)\s+\(\d+\)\s+Total pre-tax USD\s+([\d,]+\.?\d*)', full_text)
+                    total_bill_amount = 0.0
+                    if total_bill_match:
+                        total_bill_amount = float(total_bill_match.group(1).replace(',', ''))
+                        logger.info(f"Found total bill amount: ${total_bill_amount:,.2f}")
+                    
+                    # Parse Linux vs RHEL EC2 instances separately
+                    ec2_linux_total = 0.0
+                    ec2_rhel_total = 0.0
+                    for line in full_text.split('\n'):
+                        if 'instance usage' in line.lower() and 'USD' in line:
+                            amounts = re.findall(r'USD\s+([\d,]+\.?\d*)', line)
+                            if amounts:
+                                amount = float(amounts[-1].replace(',', ''))
+                                
+                                if 'Linux' in line and 'RHEL' not in line and 'Red Hat' not in line:
+                                    ec2_linux_total += amount
+                                elif 'RHEL' in line or 'Red Hat' in line:
+                                    ec2_rhel_total += amount
+                    
+                    if ec2_linux_total > 0 or ec2_rhel_total > 0:
+                        logger.info(f"EC2 breakdown - Linux: ${ec2_linux_total:,.2f}, RHEL: ${ec2_rhel_total:,.2f}")
+                    
                     for service, patterns in service_patterns.items():
                         for pattern in patterns:
                             matches = re.findall(pattern, full_text)
@@ -159,6 +183,12 @@ class BillProcessor:
                                         service_totals_raw[service] = amount
                                         service_costs[service] = amount
                                         service_reserved[service] = 0.0
+                                        
+                                        # Store Linux/RHEL breakdown for EC2
+                                        if service == 'EC2' and (ec2_linux_total > 0 or ec2_rhel_total > 0):
+                                            service_totals_raw['EC2_LINUX'] = ec2_linux_total
+                                            service_totals_raw['EC2_RHEL'] = ec2_rhel_total
+                                        
                                         break
                                 break
                     
@@ -337,9 +367,18 @@ class BillProcessor:
                     else:
                         item['savings_percentage'] = 0
             
+            # Add Linux/RHEL breakdown to EC2 item
+            for item in savings_breakdown:
+                if item['service'] == 'Compute (EC2)':
+                    if 'EC2_LINUX' in service_totals_raw:
+                        item['linux_cost'] = service_totals_raw['EC2_LINUX']
+                    if 'EC2_RHEL' in service_totals_raw:
+                        item['rhel_cost'] = service_totals_raw['EC2_RHEL']
+            
             return {
                 'success': True,
                 'total_cost': total_cost,
+                'total_bill_amount': total_bill_amount if total_bill_amount > 0 else total_cost,
                 'service_costs': service_costs,
                 'service_reserved': service_reserved,
                 'storage_costs': storage_costs,
@@ -501,7 +540,8 @@ class BillProcessor:
                 has_reserved = True
             
             # Calculate storage breakdown for CSV data (same as PDF)
-            rds_total = service_costs.get('RDS', 0.0) + service_reserved.get('RDS', 0.0)
+            # NOTE: service_reserved tracks coverage already in bill, not additional cost
+            rds_total = service_costs.get('RDS', 0.0)
             rds_storage = 0.0
             rds_compute = 0.0
             if rds_total > 0:
@@ -510,7 +550,7 @@ class BillProcessor:
                 rds_on_demand = max(0, rds_compute - service_reserved.get('RDS', 0.0))
                 service_costs['RDS'] = rds_on_demand
             
-            ec2_total = service_costs.get('EC2', 0.0) + service_reserved.get('EC2', 0.0)
+            ec2_total = service_costs.get('EC2', 0.0)
             ec2_ebs = 0.0
             ec2_compute_total = 0.0
             ec2_covered_by_sp = 0.0
