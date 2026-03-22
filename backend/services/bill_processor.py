@@ -127,92 +127,66 @@ class BillProcessor:
             # Open PDF with pdfplumber
             try:
                 with pdfplumber.open(io.BytesIO(file_content)) as pdf:
-                    for page in pdf.pages:
-                        text = page.extract_text()
-                        if not text:
-                            continue
-                        
-                        # Split into lines and process
-                        lines = text.split('\n')
-                        for i, line in enumerate(lines):
-                            # Skip if line is too short or doesn't have USD
-                            if 'USD' not in line or len(line) < 10:
-                                continue
-                            
-                            # Look for AWS service summary lines (format: "Service Name USD amount")
-                            # These typically appear after "Description" headers
-                            service = BillProcessor.identify_service(line)
-                            
-                            if service != 'Other':
-                                # Extract amounts from this line
-                                amounts = re.findall(r'USD\s+([\d,]+\.?\d*)', line)
-                                if amounts:
-                                    # Get the last (usually most significant) amount
-                                    amount = float(amounts[-1].replace(',', ''))
-                                    
-                                    # Check if it's a main service line (not a sub-item)
-                                    # Main lines usually have the service name near the start
-                                    is_main_line = False
-                                    for keyword_list in BillProcessor.SERVICE_MAPPING.values():
-                                        for keyword in keyword_list:
-                                            if line.strip().startswith(keyword) or line.strip().startswith('Amazon ' + keyword):
-                                                is_main_line = True
-                                                break
-                                    
-                                    # Also check for "Savings Plan" indicators
-                                    is_reserved = BillProcessor.detect_reserved_coverage(line)
-                                    
-                                    if is_main_line and amount > 0:
-                                        if service not in service_totals_raw:
-                                            service_totals_raw[service] = 0.0
-                                            service_costs[service] = 0.0
-                                            service_reserved[service] = 0.0
-                                        
-                                        # For main service lines, use the amount as total
-                                        # Only take the largest value for each service (avoid duplicates)
-                                        if amount > service_totals_raw[service]:
-                                            service_totals_raw[service] = amount
-                                            
-                                            if is_reserved:
-                                                service_reserved[service] = amount
-                                                has_reserved = True
-                                            else:
-                                                service_costs[service] = amount
-                            
-                            # Also look for explicit "Savings Plans for AWS Compute" lines
-                            if 'Savings Plans for AWS Compute' in line or 'Savings Plan' in line:
-                                amounts = re.findall(r'USD\s+([\d,]+\.?\d*)', line)
-                                if amounts:
-                                    amount = float(amounts[-1].replace(',', ''))
-                                    if amount > 100:  # Significant savings amount
-                                        if 'EC2' not in service_reserved:
-                                            service_reserved['EC2'] = 0.0
-                                        # Track EC2 savings plan coverage
-                                        service_reserved['EC2'] = max(service_reserved['EC2'], amount)
-                                        has_reserved = True
+                    # Parse more pages to catch services listed later (AWS bills can be 50+ pages)
+                    max_pages = min(40, len(pdf.pages))
+                    full_text = ""
+                    logger.info(f"Processing {max_pages} of {len(pdf.pages)} pages")
+                    
+                    for page_num in range(max_pages):
+                        text = pdf.pages[page_num].extract_text()
+                        if text:
+                            full_text += text + "\n"
+                    
+                    # Use targeted regex patterns for main service totals
+                    service_patterns = {
+                        'EC2': [r'Elastic Compute Cloud\s+USD\s+([\d,]+\.?\d*)'],
+                        'RDS': [r'Relational Database Service\s+USD\s+([\d,]+\.?\d*)'],
+                        'CLOUDFRONT': [r'(?:Amazon\s+)?CloudFront\s+USD\s+([\d,]+\.?\d*)'],
+                        'S3': [r'Simple Storage Service\s+USD\s+([\d,]+\.?\d*)'],
+                        'LAMBDA': [r'(?:AWS\s+)?Lambda\s+USD\s+([\d,]+\.?\d*)'],
+                        'OPENSEARCH': [r'OpenSearch Service\s+USD\s+([\d,]+\.?\d*)'],
+                        'ELASTICACHE': [r'ElastiCache\s+USD\s+([\d,]+\.?\d*)'],
+                    }
+                    
+                    for service, patterns in service_patterns.items():
+                        for pattern in patterns:
+                            matches = re.findall(pattern, full_text)
+                            if matches:
+                                # Take first match over $10 (main service total)
+                                for match in matches:
+                                    amount = float(match.replace(',', ''))
+                                    if amount > 10:
+                                        service_totals_raw[service] = amount
+                                        service_costs[service] = amount
+                                        service_reserved[service] = 0.0
+                                        break
+                                break
+                    
+                    # Look for Savings Plans coverage on EC2
+                    sp_matches = re.findall(r'Savings Plans for AWS Compute usage\s+USD\s+([\d,]+\.?\d*)', full_text)
+                    if sp_matches:
+                        sp_amount = float(sp_matches[0].replace(',', ''))
+                        if sp_amount > 1000 and 'EC2' in service_costs:
+                            # This is coverage already applied, not additional cost
+                            service_reserved['EC2'] = sp_amount
+                            has_reserved = True
+                            logger.info(f"Found EC2 Savings Plan coverage: ${sp_amount:,.2f}")
+                    
+                    # Calculate total from parsed services
+                    total_cost = sum(service_totals_raw.values())
+                    logger.info(f"Extracted {len(service_totals_raw)} services, total: ${total_cost:,.2f}")
                             
             except Exception as pdf_error:
-                logger.warning(f"Could not parse PDF properly: {str(pdf_error)}, using mock data")
-            
-            # Recalculate total from parsed services
-            if service_totals_raw:
-                total_cost = sum(service_totals_raw.values())
-                logger.info(f"Parsed {len(service_totals_raw)} services from PDF, total: ${total_cost:,.2f}")
+                logger.warning(f"Could not parse PDF: {str(pdf_error)}, using mock data")
             
             # Calculate storage breakdown for parsed data
+            # NOTE: service_reserved['EC2'] tracks coverage already applied (portion of ec2_total)
+            # NOT an additional cost to add
             # RDS: ~15% is storage (not optimizable)
             # EC2: ~20% is EBS (not optimizable)
-            rds_total = service_costs.get('RDS', 0.0) + service_reserved.get('RDS', 0.0)
-            rds_storage = 0.0
-            rds_compute = 0.0
-            if rds_total > 0:
-                rds_storage = rds_total * 0.15
-                rds_compute = rds_total - rds_storage
-                # Adjust service_costs to only include on-demand compute
-                rds_on_demand = max(0, rds_compute - service_reserved.get('RDS', 0.0))
-                service_costs['RDS'] = rds_on_demand
             
-            ec2_total = service_costs.get('EC2', 0.0) + service_reserved.get('EC2', 0.0)
+            # EC2: Don't add reserved to total (it's already included in the bill total)
+            ec2_total = service_costs.get('EC2', 0.0)  # Bill total already includes SP coverage
             ec2_ebs = 0.0
             ec2_compute_total = 0.0
             ec2_covered_by_sp = 0.0
@@ -221,8 +195,20 @@ class BillProcessor:
                 ec2_ebs = ec2_total * 0.20
                 ec2_compute_total = ec2_total - ec2_ebs
                 ec2_covered_by_sp = service_reserved.get('EC2', 0.0)
+                # On-demand is what's left after removing SP coverage
                 ec2_on_demand = max(0, ec2_compute_total - ec2_covered_by_sp)
                 service_costs['EC2'] = ec2_on_demand
+            
+            # RDS: Similar logic
+            rds_total = service_costs.get('RDS', 0.0)  # Bill total
+            rds_storage = 0.0
+            rds_compute = 0.0
+            if rds_total > 0:
+                rds_storage = rds_total * 0.15
+                rds_compute = rds_total - rds_storage
+                # Adjust service_costs to only include on-demand compute
+                rds_on_demand = max(0, rds_compute - service_reserved.get('RDS', 0.0))
+                service_costs['RDS'] = rds_on_demand
             
             # Build storage costs dict
             storage_costs = {}
