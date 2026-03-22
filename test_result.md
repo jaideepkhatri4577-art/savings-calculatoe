@@ -190,15 +190,66 @@ frontend:
         agent: "testing"
         comment: "Page loads successfully at localhost:3000. All UI elements render correctly: tabs (Upload/Manual), upload area with drag-drop zone, file type support text, and privacy message. Dark theme styling (black background, zinc borders, orange accents) is consistent. Minor: WebSocket HMR connection error in console (ws://localhost:443/ws) - does not affect functionality."
 
+  - task: "File Upload via Browse Button"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/components/CalculatorPage.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "File upload via browse button works perfectly. Test PDF file uploaded successfully, processing state triggered, and results page loaded within expected timeframe. File input accepts PDF and CSV files as configured."
+
+  - task: "Results Page Display with Summary Cards"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/components/CalculatorPage.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "Results page displays correctly with all summary cards visible: Current Spend ($6,061), Monthly Savings ($2,243), Annual Savings ($26,922). 'Analysis Complete' badge shows correctly. Savings percentage (37.0% reduction) displayed prominently. Reserved Instances detection message shown correctly."
+
+  - task: "Savings Breakdown Table Display"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/components/CalculatorPage.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "Savings breakdown table renders correctly with all columns: Service, Original Cost, Optimized Cost, Savings, Coverage. All AWS services displayed in table (RDS, EC2, CloudFront, ElastiCache, S3, Lambda, Fargate). Table formatting and styling consistent with design."
+
+  - task: "CloudFront Flat-Rate Pricing Display"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/components/CalculatorPage.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "CRITICAL FEATURE VERIFIED: CloudFront flat-rate pricing displays correctly. CloudFront row shows: Original Cost $1,053, Optimized Cost $200, Savings -$853 (81.0% savings). Commitment type 'via Business Plan ($200/month)' is clearly visible in the savings cell. All values match expected calculations from backend."
+
 metadata:
   created_by: "testing_agent"
   version: "1.0"
-  test_sequence: 2
+  test_sequence: 3
   run_ui: true
 
 test_plan:
   current_focus:
-    - "Initial Page Load and UI Rendering"
+    - "File Upload via Browse Button"
+    - "Results Page Display with Summary Cards"
+    - "Savings Breakdown Table Display"
+    - "CloudFront Flat-Rate Pricing Display"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -208,3 +259,5 @@ agent_communication:
     message: "Completed comprehensive testing of /api/calculate-savings endpoint. All 5 backend tests passed successfully. API correctly handles PDF and CSV uploads, processes files (with mock data fallback), calculates savings with realistic discount rates (12-56%), and returns properly structured JSON responses. Error handling works correctly for invalid file types and missing files."
   - agent: "testing"
     message: "Completed initial UI verification. AWS Savings Calculator page loads correctly with all visual elements present. Screenshot captured at 1920x800 viewport. Application is ready for functional testing (file upload, results display, etc.). Minor WebSocket HMR error in console does not impact functionality."
+  - agent: "testing"
+    message: "COMPLETE END-TO-END TEST SUCCESSFUL: Tested full file upload and results display flow. All critical features working: (1) File upload via browse button - working, (2) Results page with summary cards - all visible and correct, (3) Savings breakdown table - all services displayed, (4) CloudFront flat-rate pricing - VERIFIED WORKING with Business Plan ($200/month) showing $853 savings from $1,053 original cost. All test objectives met. Minor WebSocket HMR error persists but does not affect functionality."
