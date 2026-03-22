@@ -26,21 +26,20 @@ class BillProcessor:
         'cloudfront': ['CloudFront', 'Amazon CloudFront'],
     }
     
-    # AWS Savings rates - Updated with official 2025 AWS pricing
-    # Source: AWS official pricing pages (January 2025)
-    # EC2/Lambda/Fargate: Compute Savings Plans (https://aws.amazon.com/savingsplans/compute-pricing/)
-    # Other services: 1-year No Upfront Reserved Instances
+    # AWS Savings rates - Official 2025 AWS pricing
+    # Compute Savings Plans (EC2/Lambda/Fargate): 3-year No Upfront (https://aws.amazon.com/savingsplans/compute-pricing/)
+    # Reserved Instances (RDS/ElastiCache/etc.): 1-year No Upfront
     SAVINGS_RATES = {
-        'EC2': {'discount': 0.30, 'label': 'Compute (EC2)', 'commitment': '1-year Compute SP (No Upfront)'},
-        'EC2_LINUX': {'discount': 0.30, 'label': 'EC2 Linux', 'commitment': '1-year Compute SP (No Upfront)'},
-        'EC2_RHEL': {'discount': 0.30, 'label': 'EC2 RHEL', 'commitment': '1-year Compute SP (No Upfront)'},
+        'EC2': {'discount': 0.50, 'label': 'Compute (EC2)', 'commitment': '3-year Compute SP (No Upfront)'},
+        'EC2_LINUX': {'discount': 0.50, 'label': 'EC2 Linux', 'commitment': '3-year Compute SP (No Upfront)'},
+        'EC2_RHEL': {'discount': 0.50, 'label': 'EC2 RHEL', 'commitment': '3-year Compute SP (No Upfront)'},
         'RDS': {'discount': 0.40, 'label': 'RDS', 'commitment': '1-year No Upfront RI'},
-        'LAMBDA': {'discount': 0.17, 'label': 'Lambda', 'commitment': '1-year Compute SP'},
+        'LAMBDA': {'discount': 0.50, 'label': 'Lambda', 'commitment': '3-year Compute SP (No Upfront)'},
         'ELASTICACHE': {'discount': 0.48, 'label': 'ElastiCache', 'commitment': '1-year No Upfront RI'},
         'OPENSEARCH': {'discount': 0.31, 'label': 'OpenSearch', 'commitment': '1-year No Upfront RI'},
         'REDSHIFT': {'discount': 0.40, 'label': 'Redshift', 'commitment': '1-year No Upfront RI'},
-        'ECS': {'discount': 0.30, 'label': 'ECS', 'commitment': '1-year Compute SP'},
-        'FARGATE': {'discount': 0.30, 'label': 'Fargate', 'commitment': '1-year Compute SP'},
+        'ECS': {'discount': 0.50, 'label': 'ECS', 'commitment': '3-year Compute SP (No Upfront)'},
+        'FARGATE': {'discount': 0.50, 'label': 'Fargate', 'commitment': '3-year Compute SP (No Upfront)'},
         'S3': {'discount': 0.15, 'label': 'S3', 'commitment': 'Intelligent-Tiering'},
         'DYNAMODB': {'discount': 0.35, 'label': 'DynamoDB', 'commitment': '1-year Reserved Capacity'},
         'CLOUDFRONT': {'discount': 0.0, 'label': 'CloudFront', 'commitment': 'Flat-rate Plan', 'flat_rate': True},
@@ -787,10 +786,10 @@ class BillProcessor:
                     linux_on_demand = service_metadata['EC2_LINUX_ON_DEMAND']
                     rhel_on_demand = service_metadata['EC2_RHEL_ON_DEMAND']
                     
-                    # AWS Compute Savings Plans (1-year No Upfront): 30% for both Linux and RHEL
-                    # Compute SP applies uniformly across instance types and OS
-                    linux_discount = 0.30
-                    rhel_discount = 0.30
+                    # AWS 3-year No Upfront Compute Savings Plans: ~50% for both Linux and RHEL
+                    # (Range: 38-62%, using 50% as typical mid-range for 3-year No Upfront)
+                    linux_discount = 0.50
+                    rhel_discount = 0.50
                     
                     linux_savings = linux_on_demand * linux_discount
                     rhel_savings = rhel_on_demand * rhel_discount
@@ -802,10 +801,10 @@ class BillProcessor:
                     on_demand_optimized = linux_optimized + rhel_optimized
                     optimized_cost = reserved_cost + on_demand_optimized
                     
-                    # Both use same rate, so discount_rate = 30%
-                    discount_rate = 0.30
+                    # Both use same rate
+                    discount_rate = 0.50
                     
-                    logger.info(f"EC2 Compute SP savings: Linux=${linux_savings:,.2f} (30%), RHEL=${rhel_savings:,.2f} (30%), total=${savings:,.2f}")
+                    logger.info(f"EC2 Compute SP (3-yr No Upfront): Linux=${linux_savings:,.2f}, RHEL=${rhel_savings:,.2f}, total=${savings:,.2f}")
                 else:
                     # Standard calculation for other services
                     # Optimized cost = reserved (already optimized) + discounted on-demand
